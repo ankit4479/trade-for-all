@@ -1,0 +1,34 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user personal and company information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique identifier for the user." },
+        "email": { "type": "string", "format": "email", "description": "The user's email address." },
+        "displayName": { "type": "string", "description": "The user's full name." },
+        "phoneNumber": { "type": "string", "description": "The user's phone number." },
+        "country": { "type": "string", "description": "The user's country." },
+        "state": { "type": "string", "description": "The user's state." },
+        "city": { "type": "string", "description": "The user's city." },
+        "pinCode": { "type": "string", "description": "The user's pin code." },
+        "completeAddress": { "type": "string", "description": "The user's complete personal address." },
+        "companyName": { "type": "string", "description": "The name of the user's company." },
+        "companyAddress": { "type": "string", "description": "The physical address of the company." },
+        "companyWebsite": { "type": "string", "format": "uri", "description": "The company's website URL." },
+        "companyDescription": { "type": "string", "description": "A brief description of the company." },
+        "catalogUrl": { "type": "string", "format": "uri", "description": "A link to the company's product catalog." },
+        "createdAt": { "type": "number", "description": "Timestamp when the profile was created." },
+        "updatedAt": { "type": "number", "description": "Timestamp when the profile was last updated." }
+      },
+      "required": ["uid", "email", "displayName"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles."
+    }
+  }
+}

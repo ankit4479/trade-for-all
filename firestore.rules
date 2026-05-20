@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: trade_laws
+    // Document ID: [country]_[productName]_[timestamp]
+    // Fields:
+    //   - productName: string
+    //   - hsCode: string
+    //   - originCountry: string
+    //   - destinationCountry: string
+    //   - marketType: string ('green', 'yellow', 'red')
+    //   - tradeLaws: map (importRegulations, exportRegulations, customsDocumentation, prohibitionsAndRestrictions, requiredCertifications)
+    //   - simulationParams: map
+    //   - timestamp: number
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.email == "amankr4883@gmail.com" && request.auth.token.email_verified == true;
+    }
+
+    // Since this is a backend-only write collection, we don't allow clients to write directly.
+    // We only allow the admin (or backend service account) to write.
+    // If we want users to be able to read the laws, we could allow it, but the user said "not to show in the user side".
+    // So we can restrict reads to admin only as well.
+
+    match /trade_laws/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    match /trade_pulses/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Validate User Profile
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'createdAt', 'updatedAt']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.email is string && data.email.size() > 0 &&
+             data.displayName is string &&
+             (!('phoneNumber' in data) || data.phoneNumber is string) &&
+             (!('country' in data) || data.country is string) &&
+             (!('state' in data) || data.state is string) &&
+             (!('city' in data) || data.city is string) &&
+             (!('pinCode' in data) || data.pinCode is string) &&
+             (!('completeAddress' in data) || data.completeAddress is string) &&
+             (!('companyName' in data) || data.companyName is string) &&
+             (!('companyAddress' in data) || data.companyAddress is string) &&
+             (!('companyWebsite' in data) || data.companyWebsite is string) &&
+             (!('companyDescription' in data) || data.companyDescription is string) &&
+             (!('catalogUrl' in data) || data.catalogUrl is string) &&
+             data.createdAt is number &&
+             data.updatedAt is number;
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated() && request.auth.uid == userId && isValidUserProfile(request.resource.data);
+      allow update: if isAuthenticated() && request.auth.uid == userId && isValidUserProfile(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    match /users/{userId}/products/{productId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}

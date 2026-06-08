@@ -229,6 +229,7 @@ function AppContent() {
   const [showApiBanner, setShowApiBanner] = useState(true);
   const [apiStatus, setApiStatus] = useState<{ unComtrade: boolean; wto: boolean; mode: string } | null>(null);
   const [view, setView] = useState<'dashboard' | 'profile'>('dashboard');
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Wizard State
   const [wizardStep, setWizardStep] = useState<'input' | 'clarify' | 'analyzing' | 'result'>('input');
@@ -259,11 +260,14 @@ function AppContent() {
   }, []);
 
   const handleLogin = async () => {
+    setAuthError(null);
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Login error:', err);
+      const code = err?.code || 'unknown';
+      setAuthError(`${code}: ${err?.message || 'Sign-in failed'}`);
     }
   };
 
@@ -565,6 +569,11 @@ function AppContent() {
               <LogIn className="w-5 h-5" />
               Sign In with Google
             </button>
+            {authError && (
+              <p className="mt-4 text-sm text-red-600 max-w-md mx-auto break-words font-mono">
+                {authError}
+              </p>
+            )}
           </div>
         ) : (
           <AnimatePresence mode="wait">

@@ -16,3 +16,4 @@ Write new memories with `.ai/bin/remember.sh "title" "body" [type] [tags]`.
 - [BYOK key security model](memory/2026-06-08-byok-key-security-model.md) — fact · security,byok,encryption,wto _(claude, 2026-06-08)_
 - [Security posture is defense-in-depth, not 100% unhackable](memory/2026-06-08-security-posture-is-defense-in-depth-not-100-unhackable.md) — lesson · security,architecture,saas _(claude, 2026-06-08)_
 - [Build plan and expert commission exist](memory/2026-06-08-build-plan-and-expert-commission-exist.md) — fact · saas,plan,personas,skills _(claude, 2026-06-08)_
+- [Expert commission = 16 currency-verified personas](memory/2026-06-08-expert-commission-16-currency-verified-personas.md) — fact · personas,commission,skills,research _(claude, 2026-06-08)_

@@ -17,3 +17,4 @@ Write new memories with `.ai/bin/remember.sh "title" "body" [type] [tags]`.
 - [Security posture is defense-in-depth, not 100% unhackable](memory/2026-06-08-security-posture-is-defense-in-depth-not-100-unhackable.md) — lesson · security,architecture,saas _(claude, 2026-06-08)_
 - [Build plan and expert commission exist](memory/2026-06-08-build-plan-and-expert-commission-exist.md) — fact · saas,plan,personas,skills _(claude, 2026-06-08)_
 - [Expert commission = 16 currency-verified personas](memory/2026-06-08-expert-commission-16-currency-verified-personas.md) — fact · personas,commission,skills,research _(claude, 2026-06-08)_
+- [BUILD_PLAN is now v2 with accuracy-ops + perceived-performance](memory/2026-06-08-build-plan-is-now-v2-with-accuracy-ops-perceived-performance.md) — fact · plan,accuracy,performance,roadmap _(claude, 2026-06-08)_

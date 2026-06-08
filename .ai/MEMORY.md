@@ -13,3 +13,6 @@ Write new memories with `.ai/bin/remember.sh "title" "body" [type] [tags]`.
 - [SaaS unit economics hinge on a shared cache](memory/2026-06-08-saas-unit-economics-hinge-on-a-shared-cache.md) — fact · saas,cost,caching,gemini _(claude, 2026-06-08)_
 - [SaaS transformation roadmap](memory/2026-06-08-saas-transformation-roadmap.md) — fact · saas,roadmap,billing,stripe,architecture _(claude, 2026-06-08)_
 - [Trade-domain production cautions](memory/2026-06-08-trade-domain-production-cautions.md) — lesson · saas,trade,compliance,risk _(claude, 2026-06-08)_
+- [BYOK key security model](memory/2026-06-08-byok-key-security-model.md) — fact · security,byok,encryption,wto _(claude, 2026-06-08)_
+- [Security posture is defense-in-depth, not 100% unhackable](memory/2026-06-08-security-posture-is-defense-in-depth-not-100-unhackable.md) — lesson · security,architecture,saas _(claude, 2026-06-08)_
+- [Build plan and expert commission exist](memory/2026-06-08-build-plan-and-expert-commission-exist.md) — fact · saas,plan,personas,skills _(claude, 2026-06-08)_

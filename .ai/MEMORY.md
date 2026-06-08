@@ -7,3 +7,5 @@ Write new memories with `.ai/bin/remember.sh "title" "body" [type] [tags]`.
 - [Project is Global Trade Intelligence Engine](memory/2026-06-08-project-overview.md) — fact · project _(claude, 2026-06-08)_
 - [Local run setup](memory/2026-06-08-local-run-setup.md) — fact · setup,env _(claude, 2026-06-08)_
 - [Firebase login config](memory/2026-06-08-firebase-login.md) — lesson · auth,firebase _(claude, 2026-06-08)_
+- [Graphify is the shared codebase map](memory/2026-06-08-graphify-is-the-shared-codebase-map.md) — fact · graphify,memory,setup _(claude, 2026-06-08)_
+- [Codex needs re-login](memory/2026-06-08-codex-needs-re-login.md) — lesson · codex,auth _(claude, 2026-06-08)_

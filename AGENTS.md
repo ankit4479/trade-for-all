@@ -26,6 +26,20 @@ a line covering it, edit that memory file in `.ai/memory/` instead of adding a n
 
 **Never** put secrets or API keys in `.ai/` — it is committed to the repo.
 
+## Codebase graph (graphify) — shared with all models
+The repo is mapped into `graphify-out/` (a knowledge graph). Before a non-trivial code change,
+consult it instead of re-reading many files:
+```bash
+graphify query "how does login work"      # ask the graph
+graphify path "MarketDetailModal" "Firestore"
+graphify explain "fetchMarketDetails"
+```
+Or read `graphify-out/GRAPH_REPORT.md` for the human-readable overview. See `.ai/skills/use-graph.md`.
+The graph **auto-rebuilds on every `git commit`** via a git post-commit hook (AST, no LLM) — so after
+you commit code, the graph is current. If `graphify-out/graph.json` is missing (fresh clone), the
+full rebuild is a Claude Code command (`/graphify .`); from Codex you can trigger an AST refresh by
+making a commit. Run `graphify hook install` once per environment (git hooks aren't shared by the repo).
+
 ## Project
 Global Trade Intelligence Engine — AI app for SME exporters (React 19 + Vite + Express proxy +
 Gemini + Firebase). Details, run setup, and auth notes are in `.ai/memory/`. Key points:

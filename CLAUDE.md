@@ -17,6 +17,14 @@ Gemini CLI together. Treat it as your long-term memory across sessions and acros
 - **Before reinventing a procedure**, check `.ai/skills/` — shared skills usable by all models.
 - **Never** put secrets/API keys in `.ai/` (it's committed to the repo).
 
+## Codebase graph (graphify) — shared with all models
+The repo is mapped into `graphify-out/` (a knowledge graph). Before a non-trivial code change,
+consult it instead of re-reading many files: read `graphify-out/GRAPH_REPORT.md`, or run
+`graphify query "..."`, `graphify path "A" "B"`, `graphify explain "node"`. See `.ai/skills/use-graph.md`.
+The graph **auto-rebuilds on every `git commit`** via the git post-commit hook (AST, no LLM).
+If `graphify-out/graph.json` is missing (fresh clone), rebuild with `/graphify .` and run
+`graphify hook install` once to re-enable the commit hook (git hooks aren't shared by the repo).
+
 ## Project
 Global Trade Intelligence Engine — AI app for SME exporters. See `.ai/memory/` for the full
 architecture, local-run setup, and Firebase/auth notes. Key points:

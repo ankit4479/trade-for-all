@@ -2,8 +2,9 @@
  * WTO Timeseries API client — singleton, rate-limited.
  * All WTO calls in all loaders go through this one instance.
  *
- * Verified limits from live testing:
- *   - 1.5s spacing = zero 429s
+ * Documented limits (apiportal.wto.org, TimeSeries product):
+ *   - Timeseries data endpoints: 1 call/second
+ *   - General ceiling: 10,000 calls/hour
  *   - HS_P_0070 returns 204 when no FTA exists (not an error)
  *   - Bound rate indicators: omit ps= (no time dimension)
  *   - Reporter codes: ISO-3166 numeric (WTO) ≠ M49 (Comtrade)
@@ -16,7 +17,8 @@ const logger = createLogger('wto-client');
 const client = new RateLimitedClient(
   {
     apiName:          'wto',
-    minSpacingMs:     1500,
+    requestsPerSec:   1,      // timeseries endpoint limit (portal-documented)
+    maxPerHour:       10000,  // general WTO ceiling
     maxRetries:       3,
     backoffBaseMs:    3000,
     circuitThreshold: 10,

@@ -1,17 +1,21 @@
 /**
- * RateLimitedClient — Option A (token bucket per API instance).
- * Enforces minimum spacing between calls, retries on 429/5xx with
+ * RateLimitedClient — token bucket per API instance.
+ * Enforces provider-documented rate limits, retries on 429/5xx with
  * exponential backoff, circuit-breaks after consecutive failures.
  *
  * One singleton instance per API (wto-client.ts, comtrade-client.ts).
  * All callers share the same lastCallAt, so concurrent loaders never
  * race each other on the same API.
+ *
+ * Config uses provider-native units (requestsPerSec, maxPerHour) so
+ * the intent is obvious. minSpacingMs is derived, not set directly.
  */
 import { Logger, LogContext } from './logger';
 
 export interface RateLimiterConfig {
   apiName:           string;
-  minSpacingMs:      number;  // minimum ms between calls
+  requestsPerSec:    number;  // documented provider limit (e.g. 1 for WTO timeseries)
+  maxPerHour?:       number;  // optional secondary ceiling (e.g. 10000 for WTO)
   maxRetries:        number;  // attempts before giving up (1 = no retry)
   backoffBaseMs:     number;  // first retry wait; doubles each attempt
   circuitThreshold:  number;  // consecutive errors before circuit opens
@@ -37,18 +41,44 @@ export interface ApiResponse {
 }
 
 export class RateLimitedClient {
-  private lastCallAt    = 0;
+  private lastCallAt        = 0;
   private consecutiveErrors = 0;
-  private circuitOpen   = false;
+  private circuitOpen       = false;
+  private hourlyCallCount   = 0;
+  private hourWindowStart   = 0;
+
+  // Derived from requestsPerSec — add 50ms buffer to stay clear of the limit
+  private readonly minSpacingMs: number;
 
   constructor(
     private readonly config: RateLimiterConfig,
     private readonly logger: Logger,
-  ) {}
+  ) {
+    this.minSpacingMs = Math.ceil(1000 / config.requestsPerSec) + 50;
+  }
 
   async call(opts: CallOptions): Promise<ApiResponse> {
     if (this.circuitOpen) {
       throw new Error(`[${this.config.apiName}] Circuit breaker open — too many consecutive errors`);
+    }
+
+    // Hourly ceiling guard (resets the window every 60 minutes)
+    if (this.config.maxPerHour) {
+      const now = Date.now();
+      if (now - this.hourWindowStart > 3_600_000) {
+        this.hourWindowStart = now;
+        this.hourlyCallCount = 0;
+      }
+      if (this.hourlyCallCount >= this.config.maxPerHour) {
+        const waitMs = 3_600_000 - (now - this.hourWindowStart);
+        this.logger.warn(`${this.config.apiName} hourly ceiling hit (${this.config.maxPerHour}/hr) — sleeping ${Math.ceil(waitMs / 1000)}s`, {
+          errorCode: 'hourly_limit',
+        });
+        await sleep(waitMs);
+        this.hourWindowStart = Date.now();
+        this.hourlyCallCount = 0;
+      }
+      this.hourlyCallCount++;
     }
 
     let attempt = 0;
@@ -162,7 +192,7 @@ export class RateLimitedClient {
 
   private async enforceSpacing(): Promise<void> {
     const elapsed = Date.now() - this.lastCallAt;
-    const wait = this.config.minSpacingMs - elapsed;
+    const wait = this.minSpacingMs - elapsed;
     if (wait > 0) await sleep(wait);
   }
 

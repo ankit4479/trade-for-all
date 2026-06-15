@@ -2,8 +2,9 @@
  * UN Comtrade API client — singleton, rate-limited.
  * All Comtrade calls in all loaders go through this one instance.
  *
- * Verified limits from live testing:
- *   - 0.5s spacing = zero 429s (tested with 5 consecutive calls)
+ * TODO: confirm exact limit from comtradeapi.un.org subscription dashboard
+ * and update requestsPerSec accordingly.
+ *   - Current: 1 req/s (conservative; tested 0.6s spacing with no 429s)
  *   - Reporter codes: M49 (NOT ISO-3166) — e.g. USA=842, India=699
  *   - Supports batching: multiple cmdCode and reporterCode comma-separated
  */
@@ -15,7 +16,7 @@ const logger = createLogger('comtrade-client');
 const client = new RateLimitedClient(
   {
     apiName:          'comtrade',
-    minSpacingMs:     600,   // 0.6s to be safe above the 0.5s tested threshold
+    requestsPerSec:   1,     // TODO: confirm from subscription dashboard
     maxRetries:       3,
     backoffBaseMs:    2000,
     circuitThreshold: 10,

@@ -99,9 +99,9 @@ export class RateLimitedClient {
         throw new DailyBudgetExhaustedError(this.config.apiName, this.config.maxPerDay);
       }
       this.dailyCallCount++;
-      if (this.dailyCallCount % 50 === 0 || this.dailyRemaining <= 50) {
+      if (this.dailyRemaining <= 10) {
         this.logger.warn(
-          `${this.config.apiName} daily budget: ${this.dailyCallCount}/${this.config.maxPerDay} used, ${this.dailyRemaining} remaining`,
+          `${this.config.apiName} daily budget low: ${this.dailyRemaining} calls remaining of ${this.config.maxPerDay}`,
           { meta: { used: this.dailyCallCount, remaining: this.dailyRemaining } },
         );
       }

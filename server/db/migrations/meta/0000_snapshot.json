@@ -1,9 +1,301 @@
 {
-  "id": "1fce74a3-1bcb-47e1-b5b0-00a318947296",
+  "id": "e50d683c-6cdf-45f2-9025-374d850e253a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.country_tariff_profiles": {
+      "name": "country_tariff_profiles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "reporter_code": {
+          "name": "reporter_code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "simple_avg_mfn_all_pct": {
+          "name": "simple_avg_mfn_all_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trade_wtd_mfn_all_pct": {
+          "name": "trade_wtd_mfn_all_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "simple_avg_mfn_agr_pct": {
+          "name": "simple_avg_mfn_agr_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trade_wtd_mfn_agr_pct": {
+          "name": "trade_wtd_mfn_agr_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "simple_avg_mfn_non_agr_pct": {
+          "name": "simple_avg_mfn_non_agr_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trade_wtd_mfn_non_agr_pct": {
+          "name": "trade_wtd_mfn_non_agr_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ingestion_run_id": {
+          "name": "ingestion_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "stale_at": {
+          "name": "stale_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "country_tariff_profiles_uq": {
+          "name": "country_tariff_profiles_uq",
+          "columns": [
+            {
+              "expression": "reporter_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "year",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "country_tariff_profiles_lookup_idx": {
+          "name": "country_tariff_profiles_lookup_idx",
+          "columns": [
+            {
+              "expression": "reporter_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "country_tariff_profiles_reporter_code_jurisdictions_code_fk": {
+          "name": "country_tariff_profiles_reporter_code_jurisdictions_code_fk",
+          "tableFrom": "country_tariff_profiles",
+          "tableTo": "jurisdictions",
+          "columnsFrom": [
+            "reporter_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "country_tariff_profiles_source_id_sources_id_fk": {
+          "name": "country_tariff_profiles_source_id_sources_id_fk",
+          "tableFrom": "country_tariff_profiles",
+          "tableTo": "sources",
+          "columnsFrom": [
+            "source_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "country_tariff_profiles_ingestion_run_id_ingestion_runs_id_fk": {
+          "name": "country_tariff_profiles_ingestion_run_id_ingestion_runs_id_fk",
+          "tableFrom": "country_tariff_profiles",
+          "tableTo": "ingestion_runs",
+          "columnsFrom": [
+            "ingestion_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.freshness_policy": {
+      "name": "freshness_policy",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "jurisdiction_code": {
+          "name": "jurisdiction_code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "layer": {
+          "name": "layer",
+          "type": "data_layer",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "volatility_class": {
+          "name": "volatility_class",
+          "type": "volatility_class",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refresh_interval_days": {
+          "name": "refresh_interval_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "watch_enabled": {
+          "name": "watch_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "last_refreshed_at": {
+          "name": "last_refreshed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_due_at": {
+          "name": "next_due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "freshness_policy_uq": {
+          "name": "freshness_policy_uq",
+          "columns": [
+            {
+              "expression": "jurisdiction_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "layer",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "freshness_policy_due_idx": {
+          "name": "freshness_policy_due_idx",
+          "columns": [
+            {
+              "expression": "next_due_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "freshness_policy_jurisdiction_code_jurisdictions_code_fk": {
+          "name": "freshness_policy_jurisdiction_code_jurisdictions_code_fk",
+          "tableFrom": "freshness_policy",
+          "tableTo": "jurisdictions",
+          "columnsFrom": [
+            "jurisdiction_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.hs_codes": {
       "name": "hs_codes",
       "schema": "",
@@ -45,19 +337,18 @@
           "primaryKey": false,
           "notNull": false
         },
-        "created_at": {
-          "name": "created_at",
+        "fetched_at": {
+          "name": "fetched_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updated_at": {
-          "name": "updated_at",
+        "expires_at": {
+          "name": "expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false
         }
       },
       "indexes": {
@@ -113,8 +404,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.hs_tariffs": {
-      "name": "hs_tariffs",
+    "public.hs_mfn_duties": {
+      "name": "hs_mfn_duties",
       "schema": "",
       "columns": {
         "id": {
@@ -124,21 +415,14 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "reporter": {
-          "name": "reporter",
+        "reporter_code": {
+          "name": "reporter_code",
           "type": "varchar(8)",
           "primaryKey": false,
           "notNull": true
         },
-        "partner": {
-          "name": "partner",
-          "type": "varchar(8)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'WORLD'"
-        },
-        "hs6": {
-          "name": "hs6",
+        "hs_code": {
+          "name": "hs_code",
           "type": "varchar(6)",
           "primaryKey": false,
           "notNull": true
@@ -154,48 +438,10 @@
           "name": "year",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
-        },
-        "duty_type": {
-          "name": "duty_type",
-          "type": "duty_type",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "rate_type": {
-          "name": "rate_type",
-          "type": "rate_type",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ad_valorem_pct": {
-          "name": "ad_valorem_pct",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ave_pct": {
-          "name": "ave_pct",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "duty_expression": {
-          "name": "duty_expression",
-          "type": "text",
-          "primaryKey": false,
           "notNull": false
         },
         "simple_avg_pct": {
           "name": "simple_avg_pct",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "min_rate_pct": {
-          "name": "min_rate_pct",
           "type": "double precision",
           "primaryKey": false,
           "notNull": false
@@ -206,15 +452,21 @@
           "primaryKey": false,
           "notNull": false
         },
-        "nbr_lines": {
-          "name": "nbr_lines",
+        "duty_free_pct": {
+          "name": "duty_free_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nbr_tariff_lines": {
+          "name": "nbr_tariff_lines",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "trade_value_usd": {
-          "name": "trade_value_usd",
-          "type": "double precision",
+        "nbr_nav_lines": {
+          "name": "nbr_nav_lines",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -224,21 +476,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "source_url": {
-          "name": "source_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "effective_from": {
-          "name": "effective_from",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "effective_to": {
-          "name": "effective_to",
-          "type": "timestamp with time zone",
+        "ingestion_run_id": {
+          "name": "ingestion_run_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -249,50 +489,31 @@
           "notNull": true,
           "default": "now()"
         },
-        "confidence": {
-          "name": "confidence",
-          "type": "double precision",
+        "stale_at": {
+          "name": "stale_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": 1
+          "notNull": false
         },
-        "superseded_by": {
-          "name": "superseded_by",
-          "type": "uuid",
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         }
       },
       "indexes": {
-        "hs_tariffs_current_uq": {
-          "name": "hs_tariffs_current_uq",
+        "hs_mfn_duties_uq": {
+          "name": "hs_mfn_duties_uq",
           "columns": [
             {
-              "expression": "reporter",
+              "expression": "reporter_code",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "partner",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "hs6",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "year",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "duty_type",
+              "expression": "hs_code",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -302,50 +523,48 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "year",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": true,
-          "where": "\"hs_tariffs\".\"superseded_by\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "hs_tariffs_lookup_idx": {
-          "name": "hs_tariffs_lookup_idx",
+        "hs_mfn_duties_lookup_idx": {
+          "name": "hs_mfn_duties_lookup_idx",
           "columns": [
             {
-              "expression": "hs6",
+              "expression": "hs_code",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "reporter",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "duty_type",
+              "expression": "reporter_code",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"hs_tariffs\".\"superseded_by\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "hs_tariffs_reporter_jurisdictions_code_fk": {
-          "name": "hs_tariffs_reporter_jurisdictions_code_fk",
-          "tableFrom": "hs_tariffs",
+        "hs_mfn_duties_reporter_code_jurisdictions_code_fk": {
+          "name": "hs_mfn_duties_reporter_code_jurisdictions_code_fk",
+          "tableFrom": "hs_mfn_duties",
           "tableTo": "jurisdictions",
           "columnsFrom": [
-            "reporter"
+            "reporter_code"
           ],
           "columnsTo": [
             "code"
@@ -353,22 +572,9 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "hs_tariffs_partner_jurisdictions_code_fk": {
-          "name": "hs_tariffs_partner_jurisdictions_code_fk",
-          "tableFrom": "hs_tariffs",
-          "tableTo": "jurisdictions",
-          "columnsFrom": [
-            "partner"
-          ],
-          "columnsTo": [
-            "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "hs_tariffs_source_id_sources_id_fk": {
-          "name": "hs_tariffs_source_id_sources_id_fk",
-          "tableFrom": "hs_tariffs",
+        "hs_mfn_duties_source_id_sources_id_fk": {
+          "name": "hs_mfn_duties_source_id_sources_id_fk",
+          "tableFrom": "hs_mfn_duties",
           "tableTo": "sources",
           "columnsFrom": [
             "source_id"
@@ -379,17 +585,230 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "hs_tariffs_hs_fk": {
-          "name": "hs_tariffs_hs_fk",
-          "tableFrom": "hs_tariffs",
-          "tableTo": "hs_codes",
+        "hs_mfn_duties_ingestion_run_id_ingestion_runs_id_fk": {
+          "name": "hs_mfn_duties_ingestion_run_id_ingestion_runs_id_fk",
+          "tableFrom": "hs_mfn_duties",
+          "tableTo": "ingestion_runs",
           "columnsFrom": [
-            "hs6",
-            "hs_edition"
+            "ingestion_run_id"
           ],
           "columnsTo": [
-            "code",
-            "hs_edition"
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hs_preferential_rates": {
+      "name": "hs_preferential_rates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "reporter_code": {
+          "name": "reporter_code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "partner_code": {
+          "name": "partner_code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hs_code": {
+          "name": "hs_code",
+          "type": "varchar(6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hs_edition": {
+          "name": "hs_edition",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'HS2022'"
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "simple_avg_pct": {
+          "name": "simple_avg_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coverage_status": {
+          "name": "coverage_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unknown'"
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ingestion_run_id": {
+          "name": "ingestion_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "stale_at": {
+          "name": "stale_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "hs_pref_rates_uq": {
+          "name": "hs_pref_rates_uq",
+          "columns": [
+            {
+              "expression": "reporter_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "partner_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "hs_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "hs_edition",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "year",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "hs_pref_rates_lookup_idx": {
+          "name": "hs_pref_rates_lookup_idx",
+          "columns": [
+            {
+              "expression": "hs_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "reporter_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "partner_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "hs_preferential_rates_reporter_code_jurisdictions_code_fk": {
+          "name": "hs_preferential_rates_reporter_code_jurisdictions_code_fk",
+          "tableFrom": "hs_preferential_rates",
+          "tableTo": "jurisdictions",
+          "columnsFrom": [
+            "reporter_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "hs_preferential_rates_partner_code_jurisdictions_code_fk": {
+          "name": "hs_preferential_rates_partner_code_jurisdictions_code_fk",
+          "tableFrom": "hs_preferential_rates",
+          "tableTo": "jurisdictions",
+          "columnsFrom": [
+            "partner_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "hs_preferential_rates_source_id_sources_id_fk": {
+          "name": "hs_preferential_rates_source_id_sources_id_fk",
+          "tableFrom": "hs_preferential_rates",
+          "tableTo": "sources",
+          "columnsFrom": [
+            "source_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "hs_preferential_rates_ingestion_run_id_ingestion_runs_id_fk": {
+          "name": "hs_preferential_rates_ingestion_run_id_ingestion_runs_id_fk",
+          "tableFrom": "hs_preferential_rates",
+          "tableTo": "ingestion_runs",
+          "columnsFrom": [
+            "ingestion_run_id"
+          ],
+          "columnsTo": [
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -719,6 +1138,259 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.trade_flows": {
+      "name": "trade_flows",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "reporter_code": {
+          "name": "reporter_code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "partner_code": {
+          "name": "partner_code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hs_code": {
+          "name": "hs_code",
+          "type": "varchar(6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hs_edition": {
+          "name": "hs_edition",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'HS2022'"
+        },
+        "flow_code": {
+          "name": "flow_code",
+          "type": "varchar(2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trade_value_usd": {
+          "name": "trade_value_usd",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "net_weight_kg": {
+          "name": "net_weight_kg",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "qty": {
+          "name": "qty",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "qty_unit": {
+          "name": "qty_unit",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ingestion_run_id": {
+          "name": "ingestion_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "stale_at": {
+          "name": "stale_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "trade_flows_uq": {
+          "name": "trade_flows_uq",
+          "columns": [
+            {
+              "expression": "reporter_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "partner_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "hs_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "flow_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "year",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "trade_flows_lookup_idx": {
+          "name": "trade_flows_lookup_idx",
+          "columns": [
+            {
+              "expression": "hs_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "reporter_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "partner_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "trade_flows_flow_idx": {
+          "name": "trade_flows_flow_idx",
+          "columns": [
+            {
+              "expression": "flow_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "year",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "trade_flows_reporter_code_jurisdictions_code_fk": {
+          "name": "trade_flows_reporter_code_jurisdictions_code_fk",
+          "tableFrom": "trade_flows",
+          "tableTo": "jurisdictions",
+          "columnsFrom": [
+            "reporter_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "trade_flows_partner_code_jurisdictions_code_fk": {
+          "name": "trade_flows_partner_code_jurisdictions_code_fk",
+          "tableFrom": "trade_flows",
+          "tableTo": "jurisdictions",
+          "columnsFrom": [
+            "partner_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "trade_flows_source_id_sources_id_fk": {
+          "name": "trade_flows_source_id_sources_id_fk",
+          "tableFrom": "trade_flows",
+          "tableTo": "sources",
+          "columnsFrom": [
+            "source_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "trade_flows_ingestion_run_id_ingestion_runs_id_fk": {
+          "name": "trade_flows_ingestion_run_id_ingestion_runs_id_fk",
+          "tableFrom": "trade_flows",
+          "tableTo": "ingestion_runs",
+          "columnsFrom": [
+            "ingestion_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -745,15 +1417,6 @@
         "compliance"
       ]
     },
-    "public.duty_type": {
-      "name": "duty_type",
-      "schema": "public",
-      "values": [
-        "bound",
-        "mfn_applied",
-        "preferential"
-      ]
-    },
     "public.ingestion_status": {
       "name": "ingestion_status",
       "schema": "public",
@@ -771,16 +1434,6 @@
         "country",
         "bloc",
         "world"
-      ]
-    },
-    "public.rate_type": {
-      "name": "rate_type",
-      "schema": "public",
-      "values": [
-        "ad_valorem",
-        "specific",
-        "compound",
-        "free"
       ]
     },
     "public.reliability_tier": {

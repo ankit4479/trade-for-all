@@ -68,43 +68,49 @@ async function startServer() {
     }
   });
 
+  // WTO Timeseries proxy — fetches multiple indicators for one (reporter, hsCode) pair.
+  // indicator: HS_A_0010 | HS_A_0020 | HS_A_0030 | HS_A_0040 | HS_A_0050 | HS_P_0070
+  // reporter: WTO ISO-3166 numeric (840 for USA — NOT the same as Comtrade M49 842)
+  // year: omit for bound rates (HS_P_* has no time dimension)
   app.get('/api/trade/wto-tariff', async (req, res) => {
-    const { hsCode, reporter } = req.query;
-    
+    const { hsCode, reporter, indicator = 'HS_A_0010', year } = req.query;
+
     if (!hsCode || !reporter) {
       return res.status(400).json({ error: 'Missing required parameters: hsCode, reporter' });
     }
 
     try {
-      // WTO Tariff API (Integrated Database - IDB)
-      const paddedReporter = String(reporter).padStart(3, '0');
-      // Omit `ps=2022` to fetch the most recent data if possible, or adapt if the API allows.
-      // A common source of 404 is hardcoding the year. Some reporters don't have data for 2022 yet.
-      // If 404 continues, we catch it and return gracefully.
-      const url = `https://api.wto.org/tariff/v1/tariff?r=${paddedReporter}&p=000&pc=${hsCode}&fmt=json`;
-      console.log(`[Proxy] Fetching WTO Tariff: ${url}`);
-      
-      const response = await axios.get(url, {
-        headers: {
-          'Ocp-Apim-Subscription-Key': process.env.WTO_API_KEY || ''
-        },
-        timeout: 30000 // Increased timeout for WTO
+      const params = new URLSearchParams({
+        i: String(indicator),
+        r: String(reporter),
+        pc: String(hsCode),
+        fmt: 'json',
+        mode: 'full',
       });
-      
+      if (year) params.set('ps', String(year));
+
+      const url = `https://api.wto.org/timeseries/v1/data?${params}`;
+      console.log(`[Proxy] Fetching WTO Timeseries: ${url}`);
+
+      const response = await axios.get(url, {
+        headers: { 'Ocp-Apim-Subscription-Key': process.env.WTO_API_KEY || '' },
+        timeout: 30000,
+      });
+
+      // 204 = no coverage (e.g. no preferential FTA for this corridor) — not an error
+      if (response.status === 204) {
+        return res.json({ data: null, reason: 'no_coverage' });
+      }
+
       res.json(response.data);
     } catch (error: any) {
-      if (error.response?.status === 404) {
-        console.warn(`[Proxy] WTO: No data found for HS ${hsCode} and reporter ${reporter} (404)`);
-        // Graceful fallback for missing tariff data instead of a 404 hard crash
-        return res.json({ data: [] });
-      }
       const status = error.response?.status || 500;
       const errorData = error.response?.data;
       console.error('[Proxy Error] WTO:', error.message, errorData ? JSON.stringify(errorData) : '');
-      res.status(status).json({ 
+      res.status(status).json({
         error: 'Failed to fetch WTO data',
         details: error.message,
-        upstreamError: errorData
+        upstreamError: errorData,
       });
     }
   });

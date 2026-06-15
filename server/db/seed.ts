@@ -21,17 +21,25 @@ async function seed() {
     .insert(jurisdictions)
     .values([
       // origin
-      { code: 'IN', kind: 'country', name: 'India', isoNumeric: '356', appliesVat: true },
+      { code: 'IN', kind: 'country', name: 'India', isoNumeric: '356', appliesVat: true,
+        apiCodes: { wto: '356', comtrade: '699' } },
       // targets (countries)
-      { code: 'US', kind: 'country', name: 'United States', isoNumeric: '840', appliesVat: false }, // no federal VAT
-      { code: 'GB', kind: 'country', name: 'United Kingdom', isoNumeric: '826', appliesVat: true },
-      { code: 'AU', kind: 'country', name: 'Australia', isoNumeric: '036', appliesVat: true },
-      { code: 'AE', kind: 'country', name: 'United Arab Emirates', isoNumeric: '784', appliesVat: true },
-      // blocs (customs unions — duty attaches here)
-      { code: 'EU', kind: 'bloc', name: 'European Union', isoNumeric: null, isCustomsUnion: true, appliesVat: false },
-      { code: 'GCC', kind: 'bloc', name: 'Gulf Cooperation Council', isoNumeric: null, isCustomsUnion: true, appliesVat: false },
-      // MFN baseline sentinel (partner = WORLD)
-      { code: 'WORLD', kind: 'world', name: 'World (MFN baseline)', isoNumeric: null, appliesVat: false },
+      { code: 'US', kind: 'country', name: 'United States', isoNumeric: '840', appliesVat: false,
+        apiCodes: { wto: '840', comtrade: '842' } },
+      { code: 'GB', kind: 'country', name: 'United Kingdom', isoNumeric: '826', appliesVat: true,
+        apiCodes: { wto: '826', comtrade: '826' } },
+      { code: 'AU', kind: 'country', name: 'Australia', isoNumeric: '036', appliesVat: true,
+        apiCodes: { wto: '036', comtrade: '36' } },
+      { code: 'AE', kind: 'country', name: 'United Arab Emirates', isoNumeric: '784', appliesVat: true,
+        apiCodes: { wto: '784', comtrade: '784' } },
+      // blocs (customs unions — duty attaches at bloc level)
+      { code: 'EU', kind: 'bloc', name: 'European Union', isoNumeric: null, isCustomsUnion: true, appliesVat: false,
+        apiCodes: { wto: '97', comtrade: '97' } },
+      { code: 'GCC', kind: 'bloc', name: 'Gulf Cooperation Council', isoNumeric: null, isCustomsUnion: true, appliesVat: false,
+        apiCodes: {} },
+      // MFN baseline sentinel (partner = WORLD means no preferential agreement)
+      { code: 'WORLD', kind: 'world', name: 'World (MFN baseline)', isoNumeric: null, appliesVat: false,
+        apiCodes: { wto: '0', comtrade: '0' } },
     ])
     .onConflictDoNothing({ target: jurisdictions.code });
 
@@ -61,14 +69,14 @@ async function seed() {
         notes: 'Bound + MFN applied + preferential + trade value, HS6, per reporter. CSV. Quarterly re-check.',
       },
       {
-        name: 'WTO Tariff API (incremental)',
-        url: 'https://api.wto.org/tariff/v1/tariff',
+        name: 'WTO Timeseries API (MFN + preferential)',
+        url: 'https://api.wto.org/timeseries/v1/data',
         jurisdictionCode: 'WORLD',
         layer: 'duty_mfn',
         accessMethod: 'api',
         reliabilityTier: 'authoritative_api',
         volatilityClass: 'annual',
-        notes: 'Per reporter+HS6 top-ups. Needs Ocp-Apim-Subscription-Key (WTO_API_KEY).',
+        notes: 'Indicators: HS_A_0010/0020/0030/0040/0050 (MFN), HS_P_0070 (pref), TP_A_* (profiles). Needs WTO_API_KEY.',
       },
       {
         name: 'UN Comtrade (trade flows)',

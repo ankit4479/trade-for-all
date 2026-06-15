@@ -1,10 +1,9 @@
 /**
  * Phase-1 database schema — Trade-for-All
  * ----------------------------------------
- * Implements .ai/PHASE_1_PLAN.md §3. Shared trade-reference data only:
- * NO tenant_id on any of these tables (they are identical for every user —
- * one copy, read-all-authenticated, write = service role / loader).
- * See .ai/specs/01-data-backbone.md and 00-foundation.md for the full model.
+ * Shared trade-reference data only — NO tenant_id on any table.
+ * One copy, read-all-authenticated, write = service role / loader.
+ * See .ai/specs/01-data-backbone.md for the full model and ADRs.
  */
 import {
   pgTable,
@@ -15,25 +14,24 @@ import {
   integer,
   boolean,
   doublePrecision,
+  bigint,
   jsonb,
   timestamp,
   index,
   uniqueIndex,
   primaryKey,
-  foreignKey,
 } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
 
 /* ── enums ──────────────────────────────────────────────────────────── */
 export const jurisdictionKind = pgEnum('jurisdiction_kind', ['country', 'bloc', 'world']);
 
 export const dataLayer = pgEnum('data_layer', [
-  'hs_nomenclature',   // the HS code tree (UN/WCO)
+  'hs_nomenclature',
   'duty_mfn',
   'duty_preferential',
-  'trade_flow',        // Comtrade
-  'tax',               // Phase 2
-  'compliance',        // Phase 2
+  'trade_flow',
+  'tax',
+  'compliance',
 ]);
 
 export const accessMethod = pgEnum('access_method', [
@@ -52,23 +50,19 @@ export const ingestionStatus = pgEnum('ingestion_status', [
   'running', 'succeeded', 'failed', 'partial',
 ]);
 
-export const dutyType = pgEnum('duty_type', ['bound', 'mfn_applied', 'preferential']);
-export const rateType = pgEnum('rate_type', ['ad_valorem', 'specific', 'compound', 'free']);
-
-/* ── jurisdictions: countries + blocs (+ WORLD sentinel) ────────────────
- * PK = code. NO tenant_id (shared reference).
- * iso_numeric = ISO 3166-1 numeric (stable). api_codes holds the
- * source-specific numeric codes (Comtrade/WTO differ from ISO) — filled
- * when each loader is wired.
- * ------------------------------------------------------------------------ */
+/* ── jurisdictions ───────────────────────────────────────────────────
+ * Countries, blocs (EU, GCC), and the WORLD sentinel.
+ * api_codes holds source-specific reporter codes:
+ *   { "wto": "840", "comtrade": "842" }  ← USA example (they differ!)
+ * -------------------------------------------------------------------- */
 export const jurisdictions = pgTable(
   'jurisdictions',
   {
-    code: varchar('code', { length: 8 }).primaryKey(), // 'IN','US','GB','AU','AE' | 'EU','GCC' | 'WORLD'
+    code: varchar('code', { length: 8 }).primaryKey(),
     kind: jurisdictionKind('kind').notNull(),
     name: varchar('name', { length: 128 }).notNull(),
-    isoNumeric: varchar('iso_numeric', { length: 3 }),                 // ISO 3166-1 numeric, null for blocs
-    apiCodes: jsonb('api_codes').$type<Record<string, string>>().default({}), // {comtrade:'699', wto:'356'}
+    isoNumeric: varchar('iso_numeric', { length: 3 }),
+    apiCodes: jsonb('api_codes').$type<Record<string, string>>().default({}),
     isCustomsUnion: boolean('is_customs_union').notNull().default(false),
     appliesVat: boolean('applies_vat').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -76,7 +70,10 @@ export const jurisdictions = pgTable(
   (t) => ({ kindIdx: index('jurisdictions_kind_idx').on(t.kind) }),
 );
 
-/* ── sources: first-class source registry ─────────────────────────────── */
+/* ── sources: first-class source registry ────────────────────────────
+ * One row per (jurisdiction × data-layer × access-method).
+ * Every stored fact references a source_id.
+ * -------------------------------------------------------------------- */
 export const sources = pgTable(
   'sources',
   {
@@ -96,7 +93,7 @@ export const sources = pgTable(
   (t) => ({ coverageIdx: index('sources_coverage_idx').on(t.jurisdictionCode, t.layer) }),
 );
 
-/* ── ingestion_runs: every fetch, with change-detection hash ──────────── */
+/* ── ingestion_runs: every fetch, with SHA-256 change detection ────── */
 export const ingestionRuns = pgTable(
   'ingestion_runs',
   {
@@ -114,21 +111,49 @@ export const ingestionRuns = pgTable(
   (t) => ({ sourceIdx: index('ingestion_runs_source_idx').on(t.sourceId, t.startedAt) }),
 );
 
-/* ── hs_codes: the HS nomenclature tree (classification engine) ─────────
- * PK = (code, hs_edition) — code alone is NOT unique across HS editions.
- * parent_code self-references within the same edition. NO tenant_id.
- * ------------------------------------------------------------------------ */
+/* ── freshness_policy: per (jurisdiction, layer) renewal schedule ─────
+ * pg-boss cron reads next_due_at to schedule ingestion jobs.
+ * Volatility class drives the cadence:
+ *   static       → rebuild only on HS edition change (years)
+ *   annual       → once per year (HS codes, MFN duties)
+ *   scheduled    → FTA phase-in dates (pre-computed)
+ *   event_driven → compliance/NTM — on-demand + ePing trigger
+ * -------------------------------------------------------------------- */
+export const freshnessPolicy = pgTable(
+  'freshness_policy',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    jurisdictionCode: varchar('jurisdiction_code', { length: 8 })
+      .notNull().references(() => jurisdictions.code),
+    layer: dataLayer('layer').notNull(),
+    volatilityClass: volatilityClass('volatility_class').notNull(),
+    refreshIntervalDays: integer('refresh_interval_days').notNull(),
+    watchEnabled: boolean('watch_enabled').notNull().default(false),
+    lastRefreshedAt: timestamp('last_refreshed_at', { withTimezone: true }),
+    nextDueAt: timestamp('next_due_at', { withTimezone: true }),
+  },
+  (t) => ({
+    uq: uniqueIndex('freshness_policy_uq').on(t.jurisdictionCode, t.layer),
+    dueIdx: index('freshness_policy_due_idx').on(t.nextDueAt),
+  }),
+);
+
+/* ── hs_codes: international HS nomenclature tree ────────────────────
+ * PK = (code, hs_edition) — same numeric code can appear in HS2017
+ * and HS2022 with different descriptions or parent assignments.
+ * Populated from Comtrade H6.json (one bulk call → ~6,940 rows).
+ * -------------------------------------------------------------------- */
 export const hsCodes = pgTable(
   'hs_codes',
   {
-    code: varchar('code', { length: 6 }).notNull(),   // '96' | '9617' | '961700'
+    code: varchar('code', { length: 6 }).notNull(),
     hsEdition: varchar('hs_edition', { length: 8 }).notNull().default('HS2022'),
     description: text('description').notNull(),
-    level: integer('level').notNull(),                // 2 | 4 | 6
+    level: integer('level').notNull(),        // 2 = chapter, 4 = heading, 6 = subheading
     parentCode: varchar('parent_code', { length: 6 }),
-    section: varchar('section', { length: 4 }),       // HS section I..XXI
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    section: varchar('section', { length: 4 }),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.code, t.hsEdition] }),
@@ -137,56 +162,159 @@ export const hsCodes = pgTable(
   }),
 );
 
-/* ── hs_tariffs: WTO facts, soft-versioned ──────────────────────────────
- * PK = surrogate id (history kept). The real uniqueness is a PARTIAL unique
- * index = exactly ONE current row per logical fact. Composite FK to
- * hs_codes(code, hs_edition). NO tenant_id (shared reference).
- * ------------------------------------------------------------------------ */
-export const hsTariffs = pgTable(
-  'hs_tariffs',
+/* ── hs_mfn_duties: WTO MFN tariff facts per HS code per reporter ─────
+ * Maps to WTO Timeseries indicators (one row per hs_code × reporter × year):
+ *   simple_avg_pct    ← HS_A_0010  simple average ad valorem MFN %
+ *   max_rate_pct      ← HS_A_0020  maximum ad valorem duty %
+ *   duty_free_pct     ← HS_A_0030  % of tariff lines that are duty-free
+ *   nbr_tariff_lines  ← HS_A_0040  number of national tariff lines
+ *   nbr_nav_lines     ← HS_A_0050  number of non-ad-valorem (NAV) lines
+ *
+ * reporter_code → jurisdictions.code (e.g. 'US', 'GB', 'EU', 'AU', 'AE')
+ * WTO reporter codes live in jurisdictions.api_codes['wto'] (ISO-3166 numeric).
+ * -------------------------------------------------------------------- */
+export const hsMfnDuties = pgTable(
+  'hs_mfn_duties',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    reporter: varchar('reporter', { length: 8 }).notNull()
-      .references(() => jurisdictions.code),                 // importer / destination
-    partner: varchar('partner', { length: 8 }).notNull()
-      .default('WORLD').references(() => jurisdictions.code), // origin; WORLD = MFN baseline
-    hs6: varchar('hs6', { length: 6 }).notNull(),
+    reporterCode: varchar('reporter_code', { length: 8 })
+      .notNull().references(() => jurisdictions.code),
+    hsCode: varchar('hs_code', { length: 6 }).notNull(),
     hsEdition: varchar('hs_edition', { length: 8 }).notNull().default('HS2022'),
-    year: integer('year').notNull(),
+    year: integer('year'),                          // null for bound rates (no time dimension in WTO)
 
-    dutyType: dutyType('duty_type').notNull(),
-    rateType: rateType('rate_type').notNull(),
-    adValoremPct: doublePrecision('ad_valorem_pct'),
-    avePct: doublePrecision('ave_pct'),
-    dutyExpression: text('duty_expression'),
+    simpleAvgPct: doublePrecision('simple_avg_pct'),   // HS_A_0010
+    maxRatePct: doublePrecision('max_rate_pct'),        // HS_A_0020
+    dutyFreePct: doublePrecision('duty_free_pct'),      // HS_A_0030
+    nbrTariffLines: integer('nbr_tariff_lines'),        // HS_A_0040
+    nbrNavLines: integer('nbr_nav_lines'),              // HS_A_0050
 
-    // HS6 aggregation across national lines (WTO is HS6-level)
-    simpleAvgPct: doublePrecision('simple_avg_pct'),
-    minRatePct: doublePrecision('min_rate_pct'),
-    maxRatePct: doublePrecision('max_rate_pct'),
-    nbrLines: integer('nbr_lines'),
-    tradeValueUsd: doublePrecision('trade_value_usd'),
-
-    // provenance + freshness
     sourceId: uuid('source_id').references(() => sources.id),
-    sourceUrl: text('source_url'),
-    effectiveFrom: timestamp('effective_from', { withTimezone: true }),
-    effectiveTo: timestamp('effective_to', { withTimezone: true }),
+    ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
     fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
-    confidence: doublePrecision('confidence').notNull().default(1),
-    supersededBy: uuid('superseded_by'),
+    staleAt: timestamp('stale_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (t) => ({
-    hsFk: foreignKey({
-      columns: [t.hs6, t.hsEdition],
-      foreignColumns: [hsCodes.code, hsCodes.hsEdition],
-      name: 'hs_tariffs_hs_fk',
-    }),
-    currentUq: uniqueIndex('hs_tariffs_current_uq')
-      .on(t.reporter, t.partner, t.hs6, t.year, t.dutyType, t.hsEdition)
-      .where(sql`${t.supersededBy} IS NULL`),
-    lookupIdx: index('hs_tariffs_lookup_idx')
-      .on(t.hs6, t.reporter, t.dutyType)
-      .where(sql`${t.supersededBy} IS NULL`),
+    uq: uniqueIndex('hs_mfn_duties_uq').on(t.reporterCode, t.hsCode, t.hsEdition, t.year),
+    lookupIdx: index('hs_mfn_duties_lookup_idx').on(t.hsCode, t.reporterCode),
+  }),
+);
+
+/* ── hs_preferential_rates: WTO lowest preferential rate per corridor ─
+ * Maps to WTO indicator HS_P_0070 (lowest preferential simple avg %).
+ * Returns HTTP 204 when no FTA covers this reporter×HS combination —
+ * stored as NULL simple_avg_pct with coverage_status = 'no_fta'.
+ *
+ * reporter_code = importer (destination), partner_code = exporter (origin).
+ * For our corridors: reporter = US/GB/EU/AU/AE, partner = IN.
+ * -------------------------------------------------------------------- */
+export const hsPreferentialRates = pgTable(
+  'hs_preferential_rates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reporterCode: varchar('reporter_code', { length: 8 })
+      .notNull().references(() => jurisdictions.code),
+    partnerCode: varchar('partner_code', { length: 8 })
+      .notNull().references(() => jurisdictions.code),
+    hsCode: varchar('hs_code', { length: 6 }).notNull(),
+    hsEdition: varchar('hs_edition', { length: 8 }).notNull().default('HS2022'),
+    year: integer('year'),
+
+    simpleAvgPct: doublePrecision('simple_avg_pct'),    // HS_P_0070 — null if no FTA
+    coverageStatus: varchar('coverage_status', { length: 32 })
+      .notNull().default('unknown'),                     // 'available' | 'no_fta' | 'pending'
+
+    sourceId: uuid('source_id').references(() => sources.id),
+    ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    staleAt: timestamp('stale_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+  },
+  (t) => ({
+    uq: uniqueIndex('hs_pref_rates_uq').on(
+      t.reporterCode, t.partnerCode, t.hsCode, t.hsEdition, t.year,
+    ),
+    lookupIdx: index('hs_pref_rates_lookup_idx').on(t.hsCode, t.reporterCode, t.partnerCode),
+  }),
+);
+
+/* ── country_tariff_profiles: WTO country-level tariff summary stats ──
+ * Maps to WTO TP_A_* indicators (one row per reporter × year):
+ *   simple_avg_mfn_all_pct     ← TP_A_0010
+ *   trade_wtd_mfn_all_pct      ← TP_A_0030
+ *   simple_avg_mfn_agr_pct     ← TP_A_0160
+ *   trade_wtd_mfn_agr_pct      ← TP_A_0170
+ *   simple_avg_mfn_non_agr_pct ← TP_A_0430
+ *   trade_wtd_mfn_non_agr_pct  ← TP_A_0440
+ *
+ * Used to show "USA average tariff: 3.3%" context alongside product rates.
+ * -------------------------------------------------------------------- */
+export const countryTariffProfiles = pgTable(
+  'country_tariff_profiles',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reporterCode: varchar('reporter_code', { length: 8 })
+      .notNull().references(() => jurisdictions.code),
+    year: integer('year').notNull(),
+
+    simpleAvgMfnAllPct: doublePrecision('simple_avg_mfn_all_pct'),
+    tradeWtdMfnAllPct: doublePrecision('trade_wtd_mfn_all_pct'),
+    simpleAvgMfnAgrPct: doublePrecision('simple_avg_mfn_agr_pct'),
+    tradeWtdMfnAgrPct: doublePrecision('trade_wtd_mfn_agr_pct'),
+    simpleAvgMfnNonAgrPct: doublePrecision('simple_avg_mfn_non_agr_pct'),
+    tradeWtdMfnNonAgrPct: doublePrecision('trade_wtd_mfn_non_agr_pct'),
+
+    sourceId: uuid('source_id').references(() => sources.id),
+    ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    staleAt: timestamp('stale_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+  },
+  (t) => ({
+    uq: uniqueIndex('country_tariff_profiles_uq').on(t.reporterCode, t.year),
+    lookupIdx: index('country_tariff_profiles_lookup_idx').on(t.reporterCode),
+  }),
+);
+
+/* ── trade_flows: UN Comtrade import/export volumes ──────────────────
+ * One row per (reporter × partner × hs_code × flow × year).
+ * Answers: "How much coffee does USA import from India per year?"
+ *
+ * reporter_code = the country reporting the trade stat
+ * partner_code  = the counterpart ('IN', 'WORLD' for totals)
+ * flow_code     = 'M' (import) | 'X' (export)
+ * Comtrade reporter codes live in jurisdictions.api_codes['comtrade'] (M49).
+ * -------------------------------------------------------------------- */
+export const tradeFlows = pgTable(
+  'trade_flows',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reporterCode: varchar('reporter_code', { length: 8 })
+      .notNull().references(() => jurisdictions.code),
+    partnerCode: varchar('partner_code', { length: 8 })
+      .notNull().references(() => jurisdictions.code),
+    hsCode: varchar('hs_code', { length: 6 }).notNull(),
+    hsEdition: varchar('hs_edition', { length: 8 }).notNull().default('HS2022'),
+    flowCode: varchar('flow_code', { length: 2 }).notNull(),  // 'M' or 'X'
+    year: integer('year').notNull(),
+
+    tradeValueUsd: bigint('trade_value_usd', { mode: 'number' }),
+    netWeightKg: doublePrecision('net_weight_kg'),
+    qty: doublePrecision('qty'),
+    qtyUnit: varchar('qty_unit', { length: 32 }),
+
+    sourceId: uuid('source_id').references(() => sources.id),
+    ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    staleAt: timestamp('stale_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+  },
+  (t) => ({
+    uq: uniqueIndex('trade_flows_uq').on(
+      t.reporterCode, t.partnerCode, t.hsCode, t.flowCode, t.year,
+    ),
+    lookupIdx: index('trade_flows_lookup_idx').on(t.hsCode, t.reporterCode, t.partnerCode),
+    flowIdx: index('trade_flows_flow_idx').on(t.flowCode, t.year),
   }),
 );

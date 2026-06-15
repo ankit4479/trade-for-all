@@ -7,19 +7,31 @@
  * All callers share the same lastCallAt, so concurrent loaders never
  * race each other on the same API.
  *
- * Config uses provider-native units (requestsPerSec, maxPerHour) so
- * the intent is obvious. minSpacingMs is derived, not set directly.
+ * Config uses provider-native units so the intent is obvious:
+ *   requestsPerSec — per-second throughput ceiling (spacing derived from this)
+ *   maxPerHour     — hourly ceiling, auto-sleeps until window resets
+ *   maxPerDay      — daily budget (e.g. Comtrade free: 500/day); throws
+ *                    DailyBudgetError when exhausted so callers can stop
+ *                    cleanly rather than wasting the remaining calls.
  */
 import { Logger, LogContext } from './logger';
 
 export interface RateLimiterConfig {
   apiName:           string;
-  requestsPerSec:    number;  // documented provider limit (e.g. 1 for WTO timeseries)
-  maxPerHour?:       number;  // optional secondary ceiling (e.g. 10000 for WTO)
+  requestsPerSec:    number;  // documented per-second limit
+  maxPerHour?:       number;  // optional hourly ceiling (sleeps to next window)
+  maxPerDay?:        number;  // optional daily budget (throws when exhausted)
   maxRetries:        number;  // attempts before giving up (1 = no retry)
   backoffBaseMs:     number;  // first retry wait; doubles each attempt
   circuitThreshold:  number;  // consecutive errors before circuit opens
   timeoutMs:         number;  // per-call timeout
+}
+
+export class DailyBudgetExhaustedError extends Error {
+  constructor(apiName: string, limit: number) {
+    super(`[${apiName}] Daily budget of ${limit} calls exhausted — restart tomorrow`);
+    this.name = 'DailyBudgetExhaustedError';
+  }
 }
 
 export interface CallOptions {
@@ -46,6 +58,8 @@ export class RateLimitedClient {
   private circuitOpen       = false;
   private hourlyCallCount   = 0;
   private hourWindowStart   = 0;
+  private dailyCallCount    = 0;
+  private dayWindowStart    = 0;
 
   // Derived from requestsPerSec — add 50ms buffer to stay clear of the limit
   private readonly minSpacingMs: number;
@@ -57,12 +71,43 @@ export class RateLimitedClient {
     this.minSpacingMs = Math.ceil(1000 / config.requestsPerSec) + 50;
   }
 
+  /** How many calls remain in the current daily window (Infinity if no maxPerDay set). */
+  get dailyRemaining(): number {
+    if (!this.config.maxPerDay) return Infinity;
+    const now = Date.now();
+    if (now - this.dayWindowStart > 86_400_000) return this.config.maxPerDay;
+    return Math.max(0, this.config.maxPerDay - this.dailyCallCount);
+  }
+
   async call(opts: CallOptions): Promise<ApiResponse> {
     if (this.circuitOpen) {
       throw new Error(`[${this.config.apiName}] Circuit breaker open — too many consecutive errors`);
     }
 
-    // Hourly ceiling guard (resets the window every 60 minutes)
+    // Daily budget guard — throws so the caller (loader) can exit cleanly
+    if (this.config.maxPerDay) {
+      const now = Date.now();
+      if (now - this.dayWindowStart > 86_400_000) {
+        this.dayWindowStart = now;
+        this.dailyCallCount = 0;
+      }
+      if (this.dailyCallCount >= this.config.maxPerDay) {
+        this.logger.error(
+          `${this.config.apiName} daily budget exhausted (${this.config.maxPerDay}/day) — stopping loader`,
+          { errorCode: 'daily_budget_exhausted', meta: { used: this.dailyCallCount, limit: this.config.maxPerDay } },
+        );
+        throw new DailyBudgetExhaustedError(this.config.apiName, this.config.maxPerDay);
+      }
+      this.dailyCallCount++;
+      if (this.dailyCallCount % 50 === 0 || this.dailyRemaining <= 50) {
+        this.logger.warn(
+          `${this.config.apiName} daily budget: ${this.dailyCallCount}/${this.config.maxPerDay} used, ${this.dailyRemaining} remaining`,
+          { meta: { used: this.dailyCallCount, remaining: this.dailyRemaining } },
+        );
+      }
+    }
+
+    // Hourly ceiling guard (resets every 60 minutes, sleeps to next window)
     if (this.config.maxPerHour) {
       const now = Date.now();
       if (now - this.hourWindowStart > 3_600_000) {

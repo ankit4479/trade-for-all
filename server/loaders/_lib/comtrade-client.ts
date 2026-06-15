@@ -2,9 +2,10 @@
  * UN Comtrade API client — singleton, rate-limited.
  * All Comtrade calls in all loaders go through this one instance.
  *
- * TODO: confirm exact limit from comtradeapi.un.org subscription dashboard
- * and update requestsPerSec accordingly.
- *   - Current: 1 req/s (conservative; tested 0.6s spacing with no 429s)
+ * Documented limits (comtradeapi.un.org, Free Token):
+ *   - 500 calls/day (binding constraint — daily budget, not per-second)
+ *   - Up to 100,000 records per request (use batching to stay within 1 call)
+ *   - No documented per-second limit; 1 req/s used as a polite default
  *   - Reporter codes: M49 (NOT ISO-3166) — e.g. USA=842, India=699
  *   - Supports batching: multiple cmdCode and reporterCode comma-separated
  */
@@ -16,7 +17,8 @@ const logger = createLogger('comtrade-client');
 const client = new RateLimitedClient(
   {
     apiName:          'comtrade',
-    requestsPerSec:   1,     // TODO: confirm from subscription dashboard
+    requestsPerSec:   1,      // polite default — no documented per-second limit
+    maxPerDay:        500,    // free token hard limit (comtradeapi.un.org)
     maxRetries:       3,
     backoffBaseMs:    2000,
     circuitThreshold: 10,

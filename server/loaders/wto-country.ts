@@ -13,7 +13,7 @@ import { countryTariffProfiles, ingestionRuns, jurisdictions, sources } from '..
 import { createLogger } from './_lib/logger';
 import { wtoFetch } from './_lib/wto-client';
 import { computeFreshness } from './_lib/freshness';
-import { eq } from 'drizzle-orm';
+import { eq, and, gt } from 'drizzle-orm';
 
 const LOADER_NAME = 'wto-country';
 const YEAR        = 2023;
@@ -93,6 +93,29 @@ async function run(): Promise<void> {
         simpleAvgMfnNonAgrPct: null,
         tradeWtdMfnNonAgrPct:  null,
       };
+
+      // ── Freshness check — skip if a non-expired profile already exists ──
+      const now = new Date();
+      const [existing] = await db
+        .select({ expiresAt: countryTariffProfiles.expiresAt })
+        .from(countryTariffProfiles)
+        .where(
+          and(
+            eq(countryTariffProfiles.reporterCode, jurisdiction.code),
+            eq(countryTariffProfiles.year, YEAR),
+            gt(countryTariffProfiles.expiresAt, now),
+          ),
+        )
+        .limit(1);
+
+      if (existing) {
+        logger.info(`SKIP ${jurisdiction.code} — profile fresh until ${existing.expiresAt?.toISOString().split('T')[0]}`, {
+          ingestionRunId, phase: 'skip', reporterCode: jurisdiction.code,
+          meta: { reason: 'fresh_in_db', expiresAt: existing.expiresAt },
+        });
+        totalUpserted++;
+        continue;
+      }
 
       logger.info(`Fetching profile for ${jurisdiction.code} (WTO code: ${wtoCode})`, {
         ingestionRunId, phase: 'fetch', reporterCode: jurisdiction.code,

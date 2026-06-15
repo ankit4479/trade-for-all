@@ -12,7 +12,7 @@ import { hsCodes, ingestionRuns, sources } from '../db/schema';
 import { createLogger } from './_lib/logger';
 import { comtradeHsReference } from './_lib/comtrade-client';
 import { computeFreshness } from './_lib/freshness';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, gt, count } from 'drizzle-orm';
 
 const LOADER_NAME  = 'hs-codes';
 const HS_EDITION   = 'HS2022';
@@ -41,6 +41,25 @@ async function run(): Promise<void> {
   logger.info('Ingestion run opened', { ingestionRunId, phase: 'init' });
 
   try {
+    // ── Freshness check — skip the API call if hs_codes is already populated and fresh ──
+    // "Fresh" = at least 6,000 rows exist AND none have expired yet
+    const now = new Date();
+    const [freshCheck] = await db
+      .select({ total: count() })
+      .from(hsCodes)
+      .where(gt(hsCodes.expiresAt, now));
+
+    if (freshCheck && freshCheck.total >= 6000) {
+      logger.info(`SKIP — hs_codes already has ${freshCheck.total} fresh rows`, {
+        ingestionRunId, phase: 'skip',
+        meta: { reason: 'fresh_in_db', rowCount: freshCheck.total },
+      });
+      await db.update(ingestionRuns)
+        .set({ status: 'succeeded', finishedAt: new Date(), rowsUpserted: 0 })
+        .where(eq(ingestionRuns.id, ingestionRunId));
+      return;
+    }
+
     logger.info('Fetching HS reference from Comtrade', {
       ingestionRunId, phase: 'fetch', tableAffected: 'hs_codes',
       apiName: 'comtrade',

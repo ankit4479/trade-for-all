@@ -19,7 +19,7 @@ import {
 import { createLogger } from './_lib/logger';
 import { wtoFetch } from './_lib/wto-client';
 import { computeFreshness } from './_lib/freshness';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, gt } from 'drizzle-orm';
 
 const LOADER_NAME  = 'wto-mfn';
 const YEAR         = 2023;
@@ -112,7 +112,32 @@ async function run(): Promise<void> {
         const apiCodes = jurisdiction.apiCodes as Record<string, string>;
         const wtoCode  = apiCodes['wto'];
 
-        logger.info(`[${processed}/${total}] ${jurisdiction.code} / HS ${hsCode}`, {
+        // ── Freshness check — skip if a non-expired row already exists ──
+        const now = new Date();
+        const [existing] = await db
+          .select({ expiresAt: hsMfnDuties.expiresAt })
+          .from(hsMfnDuties)
+          .where(
+            and(
+              eq(hsMfnDuties.reporterCode, jurisdiction.code),
+              eq(hsMfnDuties.hsCode, hsCode),
+              eq(hsMfnDuties.year, YEAR),
+              gt(hsMfnDuties.expiresAt, now),
+            ),
+          )
+          .limit(1);
+
+        if (existing) {
+          logger.info(`[${processed}/${total}] SKIP (fresh until ${existing.expiresAt?.toISOString().split('T')[0]}) ${jurisdiction.code} / HS ${hsCode}`, {
+            ingestionRunId, phase: 'skip',
+            reporterCode: jurisdiction.code, hsCode,
+            meta: { reason: 'fresh_in_db', expiresAt: existing.expiresAt },
+          });
+          totalSkipped++;
+          continue;
+        }
+
+        logger.info(`[${processed}/${total}] FETCH ${jurisdiction.code} / HS ${hsCode}`, {
           ingestionRunId, phase: 'fetch',
           reporterCode: jurisdiction.code, hsCode,
         });

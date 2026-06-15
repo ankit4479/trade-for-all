@@ -1,0 +1,24 @@
+# Local dev Postgres for Trade-for-All (Phase 1).
+# Usage: docker compose up -d   →   Postgres on localhost:5432
+# DATABASE_URL=postgresql://tfa:tfa_dev_pw@localhost:5432/trade_for_all
+services:
+  postgres:
+    image: postgres:17
+    container_name: tfa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tfa
+      POSTGRES_PASSWORD: tfa_dev_pw
+      POSTGRES_DB: trade_for_all
+    ports:
+      - "5432:5432"
+    volumes:
+      - tfa_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tfa -d trade_for_all"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  tfa_pgdata:

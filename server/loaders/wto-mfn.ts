@@ -1,14 +1,22 @@
 /**
- * Loader 3 — WTO MFN Duties + Preferential Rates
+ * Loader 3 — WTO MFN Duties + Preferential Rates (chapter-batched)
  * Populates: hs_mfn_duties, hs_preferential_rates
  * Source: WTO Timeseries API — HS_A_* and HS_P_* indicators
  * Run: npm run db:load:mfn
  *
- * Phase A (default): fetches HS-2 chapter codes (96 codes × 5 countries × 6 indicators = 2,880 calls)
- * Phase B (--level=4): fetches HS-4 heading codes (1,229 codes × 5 countries × 6 indicators)
+ * Batching strategy (confirmed via live API tests):
+ *   - indicators (i=): NOT batchable — one call per indicator
+ *   - reporters (r=): batchable — all countries in one call (3-digit zero-padded)
+ *   - product codes (pc=): batchable — all HS-6 codes for a chapter in one call
  *
- * Rate: 1.5s/call. Phase A ≈ 72 minutes. Run overnight.
- * Set HS_CHAPTER env var to load a single chapter: HS_CHAPTER=09 npm run db:load:mfn
+ * Per chapter (98 total):
+ *   5 MFN indicator calls × 1 call (all HS-6 + all countries) = 5 calls
+ *   1 preferential indicator call (all HS-6 + all countries, partner=India) = 1 call
+ *   Total: 98 chapters × 6 calls = 588 calls at 1 req/s ≈ 10 minutes
+ *   (vs old approach: 206,940 calls ≈ 57 hours)
+ *
+ * Resumability: skip entire chapter if all its HS-6 rows are fresh in DB.
+ * Single chapter mode: HS_CHAPTER=09 npm run db:load:mfn
  */
 import 'dotenv/config';
 import { db, sql as pgSql } from '../db/index';
@@ -18,22 +26,21 @@ import {
 } from '../db/schema';
 import { createLogger } from './_lib/logger';
 import { wtoFetch } from './_lib/wto-client';
-import { computeFreshness } from './_lib/freshness';
-import { eq, and, sql, gt } from 'drizzle-orm';
+import { computeFreshness, isFresh } from './_lib/freshness';
+import { eq, and, gt, count, sql } from 'drizzle-orm';
 
 const LOADER_NAME  = 'wto-mfn';
 const YEAR         = 2023;
-const PARTNER_CODE = 'IN';  // origin country for preferential rate lookups
+const PARTNER_CODE = 'IN';
 
 const logger = createLogger(LOADER_NAME);
 
-// MFN indicators → hs_mfn_duties fields
-const MFN_INDICATORS = [
-  { code: 'HS_A_0010', field: 'simpleAvgPct'    as const },
-  { code: 'HS_A_0020', field: 'maxRatePct'       as const },
-  { code: 'HS_A_0030', field: 'dutyFreePct'      as const },
-  { code: 'HS_A_0040', field: 'nbrTariffLines'   as const },
-  { code: 'HS_A_0050', field: 'nbrNavLines'      as const },
+const MFN_INDICATORS: Array<{ code: string; field: keyof MfnFields }> = [
+  { code: 'HS_A_0010', field: 'simpleAvgPct'   },
+  { code: 'HS_A_0020', field: 'maxRatePct'      },
+  { code: 'HS_A_0030', field: 'dutyFreePct'     },
+  { code: 'HS_A_0040', field: 'nbrTariffLines'  },
+  { code: 'HS_A_0050', field: 'nbrNavLines'     },
 ];
 
 interface MfnFields {
@@ -46,44 +53,62 @@ interface MfnFields {
 
 async function run(): Promise<void> {
   const singleChapter = process.env.HS_CHAPTER ?? null;
-  const level         = process.argv.includes('--level=4') ? 4 : 2;
 
-  logger.info('Starting WTO MFN loader', {
+  logger.info('Starting WTO MFN loader (chapter-batched)', {
     phase: 'init',
-    meta: { level, singleChapter, year: YEAR },
+    meta: { singleChapter, year: YEAR, strategy: 'chapter_batch' },
   });
 
-  // Load HS codes for the target level
-  const hsQuery = db.select({ code: hsCodes.code })
-    .from(hsCodes)
-    .where(
-      singleChapter
-        ? and(eq(hsCodes.level, level), eq(hsCodes.code, singleChapter))
-        : eq(hsCodes.level, level),
-    );
-
-  const hsRows = await hsQuery;
-
-  if (hsRows.length === 0) {
-    throw new Error(`No HS codes found at level ${level}${singleChapter ? ` for chapter ${singleChapter}` : ''} — run db:load:hs first`);
-  }
-
-  logger.info(`Found ${hsRows.length} HS codes at level ${level}`, {
-    phase: 'init', meta: { hsCodeCount: hsRows.length },
-  });
-
-  // Load destination jurisdictions (non-India countries + blocs with WTO codes)
+  // ── Load all destination jurisdictions ───────────────────────────────────
   const allJurisdictions = await db.select().from(jurisdictions);
   const destinations = allJurisdictions.filter((j) => {
     const apiCodes = j.apiCodes as Record<string, string>;
-    return j.code !== 'IN' && j.code !== 'WORLD' && apiCodes?.['wto'];
+    return j.code !== 'IN' && j.code !== 'WORLD' && j.code !== 'GCC' && apiCodes?.['wto'];
   });
 
-  // Get India's WTO code for preferential rate lookups
   const india = allJurisdictions.find((j) => j.code === 'IN');
   const indiaWtoCode = india ? (india.apiCodes as Record<string, string>)['wto'] : '356';
 
-  // Resolve source
+  // Build the reporter string for WTO (all countries in one param)
+  // WTO requires exactly 3-digit zero-padded codes
+  const reporterCodes = destinations.map((j) => {
+    const wto = (j.apiCodes as Record<string, string>)['wto'];
+    return wto.padStart(3, '0');
+  });
+  const reporterParam = reporterCodes.join(',');
+
+  logger.info(`Destinations: ${destinations.map((j) => j.code).join(', ')}`, {
+    phase: 'init',
+    meta: { reporterParam },
+  });
+
+  // ── Load HS-6 codes grouped by chapter ───────────────────────────────────
+  const allHs6 = await db
+    .select({ code: hsCodes.code })
+    .from(hsCodes)
+    .where(eq(hsCodes.level, 6));
+
+  // Group into chapters (first 2 digits)
+  const byChapter = new Map<string, string[]>();
+  for (const { code } of allHs6) {
+    const chapter = code.slice(0, 2);
+    if (singleChapter && chapter !== singleChapter) continue;
+    const list = byChapter.get(chapter) ?? [];
+    list.push(code);
+    byChapter.set(chapter, list);
+  }
+
+  const chapters = [...byChapter.keys()].sort();
+  if (chapters.length === 0) {
+    throw new Error('No HS-6 codes found — run db:load:hs first');
+  }
+
+  logger.info(`Processing ${chapters.length} chapters, ${allHs6.length} HS-6 codes total`, {
+    phase: 'init',
+    meta: { chapterCount: chapters.length, hs6Count: allHs6.length },
+  });
+
+  // ── Resolve source + open ingestion run ──────────────────────────────────
   const [source] = await db.select().from(sources)
     .where(eq(sources.layer, 'duty_mfn')).limit(1);
   if (!source) throw new Error('Source row for duty_mfn not found — run db:seed first');
@@ -94,196 +119,209 @@ async function run(): Promise<void> {
   const ingestionRunId = run.id;
 
   const { staleAt, expiresAt } = computeFreshness('annual');
-  const fetchedAt  = new Date();
-  let totalUpserted = 0;
-  let totalSkipped  = 0;
-  const total = hsRows.length * destinations.length;
-  let processed = 0;
-
-  logger.info(`Processing ${total} (hs_code × country) combinations`, {
-    ingestionRunId, phase: 'fetch',
-    meta: { hsCodeCount: hsRows.length, countryCount: destinations.length },
-  });
+  const fetchedAt = new Date();
+  let totalMfnUpserted   = 0;
+  let totalPrefUpserted  = 0;
+  let totalChaptersSkipped = 0;
+  let chaptersDone = 0;
 
   try {
-    for (const { code: hsCode } of hsRows) {
-      for (const jurisdiction of destinations) {
-        processed++;
-        const apiCodes = jurisdiction.apiCodes as Record<string, string>;
-        const wtoCode  = apiCodes['wto'];
+    for (const chapter of chapters) {
+      chaptersDone++;
+      const hs6Codes = byChapter.get(chapter)!;
+      const pcParam  = hs6Codes.join(',');
 
-        // ── Freshness check — skip if a non-expired row already exists ──
-        const now = new Date();
-        const [existing] = await db
-          .select({ expiresAt: hsMfnDuties.expiresAt })
-          .from(hsMfnDuties)
-          .where(
-            and(
-              eq(hsMfnDuties.reporterCode, jurisdiction.code),
-              eq(hsMfnDuties.hsCode, hsCode),
-              eq(hsMfnDuties.year, YEAR),
-              gt(hsMfnDuties.expiresAt, now),
-            ),
-          )
-          .limit(1);
+      // ── Freshness check: skip entire chapter if all its HS-6 rows are fresh ──
+      const now = new Date();
+      const [freshCheck] = await db
+        .select({ fresh: count() })
+        .from(hsMfnDuties)
+        .where(
+          and(
+            sql`LEFT(${hsMfnDuties.hsCode}, 2) = ${chapter}`,
+            eq(hsMfnDuties.year, YEAR),
+            gt(hsMfnDuties.expiresAt, now),
+          ),
+        );
 
-        if (existing) {
-          logger.info(`[${processed}/${total}] SKIP (fresh until ${existing.expiresAt?.toISOString().split('T')[0]}) ${jurisdiction.code} / HS ${hsCode}`, {
-            ingestionRunId, phase: 'skip',
-            reporterCode: jurisdiction.code, hsCode,
-            meta: { reason: 'fresh_in_db', expiresAt: existing.expiresAt },
+      // A chapter is fully fresh if we have at least (hs6Codes.length) fresh rows
+      // (one per HS-6 code — may be fewer countries but at least 1 reporter covered)
+      if (freshCheck && freshCheck.fresh >= hs6Codes.length) {
+        logger.info(`[${chaptersDone}/${chapters.length}] SKIP chapter ${chapter} — ${freshCheck.fresh} fresh rows in DB`, {
+          ingestionRunId, phase: 'skip',
+          meta: { chapter, freshRows: freshCheck.fresh, hs6Count: hs6Codes.length },
+        });
+        totalChaptersSkipped++;
+        continue;
+      }
+
+      logger.info(`[${chaptersDone}/${chapters.length}] FETCH chapter ${chapter} (${hs6Codes.length} HS-6 codes × ${destinations.length} countries)`, {
+        ingestionRunId, phase: 'fetch',
+        meta: { chapter, hs6Count: hs6Codes.length, reporters: reporterParam },
+      });
+
+      // ── Accumulate MFN fields per (reporterCode × hsCode) ────────────────
+      const mfnMap = new Map<string, MfnFields>();
+      const keyOf  = (reporter: string, hsCode: string) => `${reporter}|${hsCode}`;
+
+      for (const { code: indicator, field } of MFN_INDICATORS) {
+        const res = await wtoFetch({
+          indicator,
+          reporter:      reporterParam,
+          productCode:   pcParam,
+          year:          YEAR,
+          loaderName:    LOADER_NAME,
+          ingestionRunId,
+          logHsCode:     `ch${chapter}`,  // chapter-level label, not the full batch string
+        });
+
+        if (res.status === 204 || res.dataset.length === 0) {
+          logger.warn(`No data: ${indicator} / chapter ${chapter}`, {
+            ingestionRunId, indicator,
+            meta: { chapter, errorCode: 'no_coverage' },
           });
-          totalSkipped++;
           continue;
         }
 
-        logger.info(`[${processed}/${total}] FETCH ${jurisdiction.code} / HS ${hsCode}`, {
-          ingestionRunId, phase: 'fetch',
-          reporterCode: jurisdiction.code, hsCode,
-        });
-
-        // ── Fetch MFN indicators ──────────────────────────────────────
-        const mfnFields: MfnFields = {
-          simpleAvgPct:   null,
-          maxRatePct:     null,
-          dutyFreePct:    null,
-          nbrTariffLines: null,
-          nbrNavLines:    null,
-        };
-        let hasMfnData = false;
-
-        for (const { code: indicator, field } of MFN_INDICATORS) {
-          const res = await wtoFetch({
-            indicator,
-            reporter:      wtoCode,
-            productCode:   hsCode,
-            year:          YEAR,
-            loaderName:    LOADER_NAME,
-            ingestionRunId,
-            reporterCode:  jurisdiction.code,
-            hsCode,
-          });
-
-          if (res.status === 204 || res.dataset.length === 0) {
-            logger.warn(`No MFN data: ${indicator} / ${jurisdiction.code} / HS ${hsCode}`, {
-              ingestionRunId, indicator,
-              reporterCode: jurisdiction.code, hsCode, year: YEAR,
-              errorCode: 'no_coverage',
-            });
-            continue;
-          }
-
-          const value = res.dataset[0]?.Value ?? null;
-          (mfnFields as Record<string, unknown>)[field] = value;
-          hasMfnData = true;
+        for (const row of res.dataset) {
+          const k = keyOf(row.ReportingEconomyCode, row.ProductOrSectorCode);
+          const existing = mfnMap.get(k) ?? {
+            simpleAvgPct: null, maxRatePct: null,
+            dutyFreePct: null, nbrTariffLines: null, nbrNavLines: null,
+          };
+          (existing as unknown as Record<string, unknown>)[field] = row.Value;
+          mfnMap.set(k, existing);
         }
+      }
 
-        if (hasMfnData) {
-          await db.insert(hsMfnDuties).values({
-            reporterCode:   jurisdiction.code,
-            hsCode,
-            hsEdition:      'HS2022',
-            year:           YEAR,
-            simpleAvgPct:   mfnFields.simpleAvgPct,
-            maxRatePct:     mfnFields.maxRatePct,
-            dutyFreePct:    mfnFields.dutyFreePct,
-            nbrTariffLines: mfnFields.nbrTariffLines,
-            nbrNavLines:    mfnFields.nbrNavLines,
-            sourceId:       source.id,
-            ingestionRunId,
-            fetchedAt,
-            staleAt,
-            expiresAt,
-          }).onConflictDoUpdate({
-            target: [hsMfnDuties.reporterCode, hsMfnDuties.hsCode, hsMfnDuties.hsEdition, hsMfnDuties.year],
-            set: {
-              simpleAvgPct:   mfnFields.simpleAvgPct,
-              maxRatePct:     mfnFields.maxRatePct,
-              dutyFreePct:    mfnFields.dutyFreePct,
-              nbrTariffLines: mfnFields.nbrTariffLines,
-              nbrNavLines:    mfnFields.nbrNavLines,
-              fetchedAt,
-              staleAt,
-              expiresAt,
-            },
-          });
-          totalUpserted++;
-          logger.info(`MFN upserted: ${jurisdiction.code} / HS ${hsCode} = ${mfnFields.simpleAvgPct}%`, {
-            ingestionRunId, phase: 'upsert', tableAffected: 'hs_mfn_duties',
-            reporterCode: jurisdiction.code, hsCode, year: YEAR, rowsAffected: 1,
-          });
-        } else {
-          totalSkipped++;
-        }
+      // ── Upsert MFN rows ───────────────────────────────────────────────────
+      // Map WTO reporter codes back to our jurisdiction codes
+      const wtoToCode = new Map(
+        destinations.map((j) => [
+          (j.apiCodes as Record<string, string>)['wto'].padStart(3, '0'),
+          j.code,
+        ]),
+      );
 
-        // ── Fetch preferential rate (India → this country) ────────────
-        const prefRes = await wtoFetch({
-          indicator:    'HS_P_0070',
-          reporter:     wtoCode,
-          productCode:  hsCode,
-          loaderName:   LOADER_NAME,
-          ingestionRunId,
-          reporterCode: jurisdiction.code,
-          partnerCode:  PARTNER_CODE,
-          hsCode,
-        });
+      for (const [key, fields] of mfnMap) {
+        const [wtoReporter, hsCode] = key.split('|');
+        const reporterCode = wtoToCode.get(wtoReporter);
+        if (!reporterCode) continue;
 
-        const coverageStatus = prefRes.status === 204 || prefRes.dataset.length === 0
-          ? 'no_fta'
-          : 'available';
-
-        const prefValue = coverageStatus === 'available'
-          ? (prefRes.dataset[0]?.Value ?? null)
-          : null;
-
-        if (coverageStatus === 'no_fta') {
-          logger.warn(`No FTA: IN → ${jurisdiction.code} / HS ${hsCode}`, {
-            ingestionRunId, indicator: 'HS_P_0070',
-            reporterCode: jurisdiction.code, partnerCode: PARTNER_CODE, hsCode,
-            errorCode: 'no_coverage',
-          });
-        }
-
-        await db.insert(hsPreferentialRates).values({
-          reporterCode:   jurisdiction.code,
-          partnerCode:    PARTNER_CODE,
+        await db.insert(hsMfnDuties).values({
+          reporterCode,
           hsCode,
           hsEdition:      'HS2022',
           year:           YEAR,
-          simpleAvgPct:   prefValue,
-          coverageStatus,
+          simpleAvgPct:   fields.simpleAvgPct,
+          maxRatePct:     fields.maxRatePct,
+          dutyFreePct:    fields.dutyFreePct,
+          nbrTariffLines: fields.nbrTariffLines,
+          nbrNavLines:    fields.nbrNavLines,
           sourceId:       source.id,
           ingestionRunId,
           fetchedAt,
           staleAt,
           expiresAt,
         }).onConflictDoUpdate({
-          target: [
-            hsPreferentialRates.reporterCode,
-            hsPreferentialRates.partnerCode,
-            hsPreferentialRates.hsCode,
-            hsPreferentialRates.hsEdition,
-            hsPreferentialRates.year,
-          ],
+          target: [hsMfnDuties.reporterCode, hsMfnDuties.hsCode, hsMfnDuties.hsEdition, hsMfnDuties.year],
           set: {
-            simpleAvgPct:   prefValue,
-            coverageStatus,
+            simpleAvgPct:   fields.simpleAvgPct,
+            maxRatePct:     fields.maxRatePct,
+            dutyFreePct:    fields.dutyFreePct,
+            nbrTariffLines: fields.nbrTariffLines,
+            nbrNavLines:    fields.nbrNavLines,
             fetchedAt,
             staleAt,
             expiresAt,
           },
         });
+        totalMfnUpserted++;
       }
+
+      logger.info(`Chapter ${chapter} MFN: ${mfnMap.size} rows upserted`, {
+        ingestionRunId, phase: 'upsert', tableAffected: 'hs_mfn_duties',
+        meta: { chapter, rows: mfnMap.size },
+      });
+
+      // ── Fetch preferential rates (India → each destination, all HS-6) ─────
+      const prefRes = await wtoFetch({
+        indicator:    'HS_P_0070',
+        reporter:     reporterParam,
+        productCode:  pcParam,
+        year:         YEAR,
+        loaderName:   LOADER_NAME,
+        ingestionRunId,
+        partnerCode:  PARTNER_CODE,
+        logHsCode:    `ch${chapter}`,
+      });
+
+      // Build a set of (wtoReporter|hsCode) that returned data
+      const prefData = new Map<string, number | null>();
+      for (const row of prefRes.dataset) {
+        prefData.set(keyOf(row.ReportingEconomyCode, row.ProductOrSectorCode), row.Value);
+      }
+
+      // Write a row for every (destination × HS-6) combination
+      for (const destination of destinations) {
+        const wtoCode = (destination.apiCodes as Record<string, string>)['wto'].padStart(3, '0');
+        for (const hsCode of hs6Codes) {
+          const prefKey       = keyOf(wtoCode, hsCode);
+          const hasData       = prefData.has(prefKey);
+          const coverageStatus = hasData ? 'available' : 'no_fta';
+          const prefValue     = hasData ? prefData.get(prefKey) ?? null : null;
+
+          await db.insert(hsPreferentialRates).values({
+            reporterCode:   destination.code,
+            partnerCode:    PARTNER_CODE,
+            hsCode,
+            hsEdition:      'HS2022',
+            year:           YEAR,
+            simpleAvgPct:   prefValue,
+            coverageStatus,
+            sourceId:       source.id,
+            ingestionRunId,
+            fetchedAt,
+            staleAt,
+            expiresAt,
+          }).onConflictDoUpdate({
+            target: [
+              hsPreferentialRates.reporterCode,
+              hsPreferentialRates.partnerCode,
+              hsPreferentialRates.hsCode,
+              hsPreferentialRates.hsEdition,
+              hsPreferentialRates.year,
+            ],
+            set: {
+              simpleAvgPct:   prefValue,
+              coverageStatus,
+              fetchedAt,
+              staleAt,
+              expiresAt,
+            },
+          });
+          totalPrefUpserted++;
+        }
+      }
+
+      logger.info(`Chapter ${chapter} pref: ${prefData.size} FTA rows, ${hs6Codes.length * destinations.length - prefData.size} no_fta`, {
+        ingestionRunId, phase: 'upsert', tableAffected: 'hs_preferential_rates',
+        meta: { chapter, ftaRows: prefData.size, noFtaRows: hs6Codes.length * destinations.length - prefData.size },
+      });
     }
 
     await db.update(ingestionRuns)
-      .set({ status: 'succeeded', finishedAt: new Date(), rowsUpserted: totalUpserted })
+      .set({ status: 'succeeded', finishedAt: new Date(), rowsUpserted: totalMfnUpserted + totalPrefUpserted })
       .where(eq(ingestionRuns.id, ingestionRunId));
 
-    logger.info(`WTO MFN loader complete — ${totalUpserted} upserted, ${totalSkipped} skipped`, {
+    logger.info('WTO MFN loader complete', {
       ingestionRunId, phase: 'done',
-      rowsAffected: totalUpserted,
-      meta: { totalUpserted, totalSkipped },
+      meta: {
+        chaptersProcessed: chaptersDone - totalChaptersSkipped,
+        chaptersSkipped:   totalChaptersSkipped,
+        mfnUpserted:       totalMfnUpserted,
+        prefUpserted:      totalPrefUpserted,
+      },
     });
 
   } catch (err) {

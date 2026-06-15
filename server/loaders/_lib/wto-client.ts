@@ -31,13 +31,14 @@ const BASE_URL = 'https://api.wto.org/timeseries/v1/data';
 
 export interface WtoCallOptions {
   indicator:      string;   // e.g. 'HS_A_0010'
-  reporter:       string;   // WTO ISO-3166 numeric e.g. '840' for USA
-  productCode?:   string;   // pc= param: HS chapter/heading/subheading
+  reporter:       string;   // WTO ISO-3166 numeric e.g. '840', or comma-separated batch
+  productCode?:   string;   // pc= param: single HS code or comma-separated batch
   year?:          number;   // ps= param: omit for indicators with no time dimension
   loaderName:     string;
   ingestionRunId?: string;
-  reporterCode?:  string;   // our jurisdiction code e.g. 'US' (for logging)
+  reporterCode?:  string;   // our jurisdiction code e.g. 'US' (for logging, single calls)
   partnerCode?:   string;
+  logHsCode?:     string;   // override what gets logged as hsCode (e.g. 'ch09' for batch calls)
 }
 
 export interface WtoDataset {
@@ -75,7 +76,7 @@ export async function wtoFetch(opts: WtoCallOptions): Promise<WtoResponse> {
     ingestionRunId: opts.ingestionRunId,
     reporterCode:   opts.reporterCode,
     partnerCode:    opts.partnerCode,
-    hsCode:         opts.productCode,
+    hsCode:         opts.logHsCode ?? opts.productCode,
     indicator:      opts.indicator,
     year:           opts.year,
   };

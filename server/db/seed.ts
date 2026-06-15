@@ -34,7 +34,7 @@ async function seed() {
         apiCodes: { wto: '784', comtrade: '784' } },
       // blocs (customs unions — duty attaches at bloc level)
       { code: 'EU', kind: 'bloc', name: 'European Union', isoNumeric: null, isCustomsUnion: true, appliesVat: false,
-        apiCodes: { wto: '97', comtrade: '97' } },
+        apiCodes: { wto: '918', comtrade: '97' } },
       { code: 'GCC', kind: 'bloc', name: 'Gulf Cooperation Council', isoNumeric: null, isCustomsUnion: true, appliesVat: false,
         apiCodes: {} },
       // MFN baseline sentinel (partner = WORLD means no preferential agreement)

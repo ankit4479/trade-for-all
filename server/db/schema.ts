@@ -21,6 +21,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 /* ── enums ──────────────────────────────────────────────────────────── */
 export const jurisdictionKind = pgEnum('jurisdiction_kind', ['country', 'bloc', 'world']);
@@ -49,6 +50,8 @@ export const volatilityClass = pgEnum('volatility_class', [
 export const ingestionStatus = pgEnum('ingestion_status', [
   'running', 'succeeded', 'failed', 'partial',
 ]);
+
+export const logLevel = pgEnum('log_level', ['debug', 'info', 'warn', 'error']);
 
 /* ── jurisdictions ───────────────────────────────────────────────────
  * Countries, blocs (EU, GCC), and the WORLD sentinel.
@@ -316,5 +319,58 @@ export const tradeFlows = pgTable(
     ),
     lookupIdx: index('trade_flows_lookup_idx').on(t.hsCode, t.reporterCode, t.partnerCode),
     flowIdx: index('trade_flows_flow_idx').on(t.flowCode, t.year),
+  }),
+);
+
+/* ── pipeline_logs: LLM-queryable log store for all loaders ──────────
+ * Every API call and upsert emits a row here in addition to stdout.
+ * Design goal: an LLM can diagnose any pipeline failure using only SQL
+ * against this table + ingestion_runs. No human log-reading required.
+ *
+ * Retention: rows older than 90 days are deleted by a scheduled job.
+ * See .ai/specs/03-observability.md for the full diagnostic query set.
+ * -------------------------------------------------------------------- */
+export const pipelineLogs = pgTable(
+  'pipeline_logs',
+  {
+    id:             uuid('id').defaultRandom().primaryKey(),
+    ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
+    loaderName:     varchar('loader_name', { length: 64 }).notNull(),
+    level:          logLevel('level').notNull(),
+    message:        text('message').notNull(),
+    phase:          varchar('phase', { length: 64 }),           // 'fetch'|'transform'|'upsert'|'retry'
+    tableAffected:  varchar('table_affected', { length: 64 }),
+
+    // API call context
+    apiName:        varchar('api_name', { length: 32 }),        // 'wto'|'comtrade'
+    apiUrl:         text('api_url'),                            // sanitised — no API key
+    httpStatus:     integer('http_status'),
+    durationMs:     integer('duration_ms'),
+    attemptNumber:  integer('attempt_number'),
+
+    // Data context — what row is being processed
+    reporterCode:   varchar('reporter_code', { length: 8 }),
+    partnerCode:    varchar('partner_code', { length: 8 }),
+    hsCode:         varchar('hs_code', { length: 6 }),
+    indicator:      varchar('indicator', { length: 16 }),
+    year:           integer('year'),
+
+    // Result
+    rowsAffected:   integer('rows_affected'),
+    errorCode:      varchar('error_code', { length: 32 }),      // 'rate_limited'|'no_coverage'|'timeout'
+    errorDetail:    text('error_detail'),
+    meta:           jsonb('meta').$type<Record<string, unknown>>(),
+
+    createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx:    index('pipeline_logs_run_idx').on(t.ingestionRunId, t.createdAt),
+    levelIdx:  index('pipeline_logs_level_idx').on(t.level, t.createdAt),
+    loaderIdx: index('pipeline_logs_loader_idx').on(t.loaderName, t.createdAt),
+    apiIdx:    index('pipeline_logs_api_idx').on(t.apiName, t.httpStatus),
+    hsIdx:     index('pipeline_logs_hs_idx').on(t.hsCode, t.reporterCode),
+    errorIdx:  index('pipeline_logs_error_idx')
+      .on(t.errorCode)
+      .where(sql`error_code IS NOT NULL`),
   }),
 );

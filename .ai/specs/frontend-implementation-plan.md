@@ -312,6 +312,11 @@ Route-split Landing/Workspace/MarketDetail/Settings/Pricing. Lighthouse CI + bun
 **Tiles = a mix:** self-hosted **Protomaps PMTiles** (primary — we host one file → identical every time, no
 limits, $0) with **OpenFreeMap** as the zero-setup fallback/dev source, switchable by config. Consistent
 rendering guaranteed (our style + our tiles, no provider restyle/billing). Accessible **list fallback** (market cards).
+**Quality bar (non-negotiable):** use a *professionally-designed* vector base style (Protomaps "Light"/"White"
+or equivalent) — NOT a hand-rolled flat fill; hiDPI/retina-crisp, anti-aliased, proper vector labels +
+collision, smooth eased zoom/pan/hover, custom-styled markers, token-matched country fills. It must look on par
+with Google Maps / Mapbox — never the default unstyled MapLibre demo. **Side-by-side visual QA vs Google Maps
+is a DoD gate** for the map issue.
 
 ## 9. Accessibility (WCAG AA)
 Color independence (color+icon+word) · full keyboard incl. map countries · shadcn ARIA · `aria-live` for SSE

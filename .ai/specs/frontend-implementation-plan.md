@@ -221,7 +221,8 @@ skeleton toast(sonner) badge progress avatar scroll-area alert separator hover-c
                                    remove artificial 500/1500ms delays)
  DocumentGeneratorModal         → features/docs/DocumentDrawer (drawer; LAZY jspdf; no fake 1000ms delay)
  TalkToExpertModal              → folded INTO chat pane (streamed; no separate modal)
- WorldMap (d3, EAGER)           → features/map/WorldMap (LAZY; choropleth+dots; keyboard-nav; titles)
+ WorldMap (d3, EAGER)           → features/map/WorldMap (Google Maps via @vis.gl/react-google-maps; LAZY;
+                                  polished basemap + data-driven country verdict styling + markers; list a11y fallback)
  MarketCard                     → verdict = icon+word+color; remove hard .slice(0,2) hidden items
  ExportSimulator                → features/simulator/Simulator (profit verdict line; currency-bound; guards)
  CustomMarketExplorer           → folded into chat ("what about X"); dedupe country list
@@ -299,9 +300,15 @@ action · offline shows 📡 "Showing saved data" · designed-unknown ("couldn't
 
 ## 8. Performance budgets (Osmani, CI-gated)
 Initial JS ≤170KB gzip · FCP<1.5s · first useful content<3s · LCP<2.5s · INP<200ms · CLS<0.1. Lazy: WorldMap
-(d3), DocumentDrawer (jspdf), Google Maps (logistics only — **remove the app-wide Maps-key gate** in App.tsx).
+(**Google Maps** — loaded async after analysis, NOT in the JS bundle; the verdict map AND the logistics map
+both use it), DocumentDrawer (jspdf). **Remove the app-wide Maps-key gate** in App.tsx → Maps is a leaf that
+degrades to a list if the key is absent. Google Maps cost mitigation: lazy (never on landing), cache map
+loads, restrict zoom/interactions to what we need.
 Route-split Landing/Workspace/MarketDetail/Settings/Pricing. Lighthouse CI + bundlesize = **merge gates**.
-Open: d3 (~110KB) vs prebuilt SVG choropleth (lean SVG).
+**Map = Google Maps** (`@vis.gl/react-google-maps`, already a dep): polished Google-Maps-quality basemap
+(custom muted style so verdict colors pop), **data-driven styling** on country boundaries for 🟢🟡🔴, +
+markers for origin/destinations. Needs a Map ID with feature-layer styling + billing. Async external load
+(off the JS-bundle budget). Accessible **list fallback** (the market cards) for keyboard/SR.
 
 ## 9. Accessibility (WCAG AA)
 Color independence (color+icon+word) · full keyboard incl. map countries · shadcn ARIA · `aria-live` for SSE
@@ -398,7 +405,9 @@ Title · Milestone + blocks/blocked-by
 ```
 
 ## 15. Open (non-blocking) decisions
-1. Map lib: d3 vs prebuilt SVG choropleth (lean SVG). 2. Compare mode v1 vs fast-follow (fast-follow).
+1. Map lib: **RESOLVED → Google Maps** (`@vis.gl/react-google-maps`) for a polished, Google-Maps-quality
+   look — basemap + data-driven country verdict styling + markers; replaces the crude d3/SVG MVP map.
+   2. Compare mode v1 vs fast-follow (fast-follow).
 3. Exact prices ($) for Pro/Plus + annual discount (placeholder until set). 4. Annual billing in v1? (lean yes,
 toggle). 5. Email/notification provider for dunning + onboarding (TBD).
 

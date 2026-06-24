@@ -221,8 +221,9 @@ skeleton toast(sonner) badge progress avatar scroll-area alert separator hover-c
                                    remove artificial 500/1500ms delays)
  DocumentGeneratorModal         → features/docs/DocumentDrawer (drawer; LAZY jspdf; no fake 1000ms delay)
  TalkToExpertModal              → folded INTO chat pane (streamed; no separate modal)
- WorldMap (d3, EAGER)           → features/map/WorldMap (Google Maps via @vis.gl/react-google-maps; LAZY;
-                                  polished basemap + data-driven country verdict styling + markers; list a11y fallback)
+ WorldMap (d3, EAGER)           → features/map/WorldMap (MapLibre GL JS; LAZY; vector basemap + country
+                                  verdict fill + hover/select; tiles = self-hosted Protomaps PMTiles (primary)
+                                  + OpenFreeMap (fallback/dev); list a11y fallback). Drops @vis.gl/react-google-maps.
  MarketCard                     → verdict = icon+word+color; remove hard .slice(0,2) hidden items
  ExportSimulator                → features/simulator/Simulator (profit verdict line; currency-bound; guards)
  CustomMarketExplorer           → folded into chat ("what about X"); dedupe country list
@@ -300,15 +301,17 @@ action · offline shows 📡 "Showing saved data" · designed-unknown ("couldn't
 
 ## 8. Performance budgets (Osmani, CI-gated)
 Initial JS ≤170KB gzip · FCP<1.5s · first useful content<3s · LCP<2.5s · INP<200ms · CLS<0.1. Lazy: WorldMap
-(**Google Maps** — loaded async after analysis, NOT in the JS bundle; the verdict map AND the logistics map
-both use it), DocumentDrawer (jspdf). **Remove the app-wide Maps-key gate** in App.tsx → Maps is a leaf that
-degrades to a list if the key is absent. Google Maps cost mitigation: lazy (never on landing), cache map
-loads, restrict zoom/interactions to what we need.
+(**MapLibre GL JS** ~200KB — lazy-loaded after analysis, off the initial JS budget; powers BOTH the verdict
+map and the deep-dive logistics map), DocumentDrawer (jspdf). **Remove the app-wide (Google) Maps-key gate**
+in App.tsx → no Google key needed at all; map degrades to the market list if tiles fail. Tile cost = $0
+(self-hosted Protomaps / OpenFreeMap).
 Route-split Landing/Workspace/MarketDetail/Settings/Pricing. Lighthouse CI + bundlesize = **merge gates**.
-**Map = Google Maps** (`@vis.gl/react-google-maps`, already a dep): polished Google-Maps-quality basemap
-(custom muted style so verdict colors pop), **data-driven styling** on country boundaries for 🟢🟡🔴, +
-markers for origin/destinations. Needs a Map ID with feature-layer styling + billing. Async external load
-(off the JS-bundle budget). Accessible **list fallback** (the market cards) for keyboard/SR.
+**Map = MapLibre GL JS** (free, open-source, GPU vector — Google-Maps-quality zoom/pan): a fixed **style JSON**
++ a **countries layer** (Natural Earth admin-0 GeoJSON) filled 🟢🟡🔴 by verdict; **hover** a country →
+`setFeatureState({hover})` highlight, **click/tap** → `onSelectCountry(iso)` swaps the canvas to that country.
+**Tiles = a mix:** self-hosted **Protomaps PMTiles** (primary — we host one file → identical every time, no
+limits, $0) with **OpenFreeMap** as the zero-setup fallback/dev source, switchable by config. Consistent
+rendering guaranteed (our style + our tiles, no provider restyle/billing). Accessible **list fallback** (market cards).
 
 ## 9. Accessibility (WCAG AA)
 Color independence (color+icon+word) · full keyboard incl. map countries · shadcn ARIA · `aria-live` for SSE
@@ -405,8 +408,10 @@ Title · Milestone + blocks/blocked-by
 ```
 
 ## 15. Open (non-blocking) decisions
-1. Map lib: **RESOLVED → Google Maps** (`@vis.gl/react-google-maps`) for a polished, Google-Maps-quality
-   look — basemap + data-driven country verdict styling + markers; replaces the crude d3/SVG MVP map.
+1. Map lib: **RESOLVED → MapLibre GL JS** (free, Google-Maps-quality) with tiles = **self-hosted Protomaps
+   PMTiles (primary) + OpenFreeMap (fallback/dev)**, config-switchable. Countries layer (Natural Earth) for
+   verdict fill + hover/select. Replaces both the crude d3/SVG MVP map and the paid Google Maps option (no
+   Google key/billing; same look every time, $0 tiles). Drops the `@vis.gl/react-google-maps` dep.
    2. Compare mode v1 vs fast-follow (fast-follow).
 3. Exact prices ($) for Pro/Plus + annual discount (placeholder until set). 4. Annual billing in v1? (lean yes,
 toggle). 5. Email/notification provider for dunning + onboarding (TBD).

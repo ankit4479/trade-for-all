@@ -313,26 +313,55 @@ effectiveTo: timestamp('effective_to', { withTimezone: true }),     // legal exp
 
 ---
 
-# 3. The 5-corridor source matrix (the build checklist)
+# 3. Data scope decision (ADR-022, 2026-06-16)
 
-Origin = **India (IN)** throughout. Each cell = a `sources` row to create. Tier legend: 🟢 `authoritative_api`
-· 🔵 `official_file` · 🟡 `official_doc` · ⚪ `aggregator`.
+## World-scope data, not corridor-scoped
 
-| Destination | duty_mfn | duty_preferential | tax | compliance |
-|---|---|---|---|---|
-| **EU** (bloc) | 🟢 TARIC / Access2Markets | 🟡 (India–EU FTA pending → none yet) | 🔵 per-state VAT — EU **TEDB** | 🟢 **Access2Markets** (gold standard) + ⚪ WTO ePing |
-| **UK** (country) | 🟢 **UK Trade Tariff API** | 🟡 UK GSP/DCTS | 🟡 Import VAT 20% — HMRC | 🟡 gov.uk "export goods" + tariff measures |
-| **US** (country) | 🔵 USITC HTS / DataWeb | 🟡 GSP (**lapsed — flag!**) | n/a federal (state sales tax — see §8) + fees MPF/HMF | 🟡 CBP + PGAs (FDA/USDA/FCC) — fragmented |
-| **AUS** (country) | 🟡 ABF Working Tariff | 🔵 **India–AUS ECTA** (in force 2022) | 🟡 GST 10% — ATO | 🟡 ABF + **biosecurity** (Dept of Agriculture) |
-| **UAE** (in GCC bloc) | 🟡 GCC common tariff 5% (Dubai/Federal customs) | 🟡 **India–UAE CEPA** schedule (treaty annex PDF) | 🟡 VAT 5% — Federal Tax Authority | 🟡 MOIAT/ESMA standards, Halal — sparse, PDF |
-| **(spine fallback, all)** | ⚪ **WITS** / WTO Tariff Download (HS6 MFN) | — | — | ⚪ WTO **I-TIP / ePing** (SPS/TBT) |
+**Decision:** The database covers ALL WTO member countries as reporters, not just the original
+5 destinations (US/GB/EU/AU/AE). This is the product's competitive moat — complete world trade data
+so any exporter from any country targeting any market can be served without re-fetching.
 
-**Reading the matrix:**
-- **EU duty attaches to the `EU` bloc row**, not to 27 country rows (ADR-015). EU `tax` attaches to each
-  member-state country row (27 VAT values from TEDB).
-- **UAE duty attaches to the `GCC` bloc row** (flat 5%); UAE `tax`/`compliance` to the `AE` country row.
-- The **spine fallback** (WITS/WTO at HS6) backstops any corridor where the national source has a gap — served
-  with lower `confidence` and a clear "HS6 approximate" flag, never silently.
+**Original plan (superseded):** 5 corridors India → US/GB/EU/AU/AE. Rejected because it limits
+the product to Indian exporters only and makes the DB a product-scoped subset rather than a
+genuine global reference.
+
+**What this means per table:**
+
+| Table | Scope | Reporter FK | Partner FK |
+|-------|-------|-------------|------------|
+| `hs_mfn_duties` | ALL ~164 WTO reporters × all HS-6 | ✅ keep (reporters = WTO members) | n/a |
+| `hs_preferential_rates` | ALL WTO reporter × partner combos | ✅ keep | ❌ drop (partners include non-WTO) |
+| `trade_flows` | ALL Comtrade reporter × partner pairs | ✅ keep | ❌ drop (partners are M49 numerics) |
+
+**`jurisdictions` table:** expanded from 8 rows to full ~164 WTO member countries.
+Populated from WTO `/timeseries/v1/reporters` endpoint. Blocs (EU=918, GCC) stay as special rows.
+
+## WTO API budget for world-scope load
+
+Batching ALL reporters in one `r=` param keeps call count identical to the 5-reporter run:
+
+| Loader | Calls | Rate | Time |
+|--------|-------|------|------|
+| `wto-mfn.ts` (all reporters) | 98 chapters × 5 indicators = 490 | 1/s | ~8 min |
+| `wto-pref.ts` (all reporters, p=all) | 98 chapters × 1 call = 98 | 1/s | ~2 min |
+| Total | 588 calls | — | ~10 min |
+
+Well within the 10,000/hr WTO ceiling. The response size increases (164 reporters × 56 HS codes
+per chapter = ~9,000 rows per call) so `c=5000` + pagination applies to MFN calls too.
+
+## The 5-corridor source matrix (tax + compliance — still destination-scoped)
+
+The world-scope decision applies to **duty_mfn and duty_preferential** (from WTO API).
+Tax rates and compliance/NTM data are still destination-scoped because they require
+separate per-country sources (HMRC, ATO, CBP etc.) — these remain 5-corridor for now.
+
+| Destination | tax | compliance |
+|---|---|---|
+| **EU** (bloc) | 🔵 per-state VAT — EU TEDB | 🟢 Access2Markets + ⚪ WTO ePing |
+| **UK** | 🟡 Import VAT 20% — HMRC | 🟡 gov.uk trade tariff measures |
+| **US** | n/a federal + MPF/HMF fees | 🟡 CBP + PGAs (FDA/USDA/FCC) |
+| **AUS** | 🟡 GST 10% — ATO | 🟡 ABF + biosecurity |
+| **UAE** | 🟡 VAT 5% — Federal Tax Authority | 🟡 MOIAT/ESMA, Halal |
 - Empty/lapsed cells (India–EU FTA, US GSP) are **modeled as explicit `coverage: unavailable`**, never invented.
 
 ---

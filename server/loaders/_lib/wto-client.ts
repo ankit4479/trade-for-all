@@ -39,6 +39,7 @@ export interface WtoCallOptions {
   reporterCode?:  string;   // our jurisdiction code e.g. 'US' (for logging, single calls)
   partnerCode?:   string;
   logHsCode?:     string;   // override what gets logged as hsCode (e.g. 'ch09' for batch calls)
+  extraParams?:   Record<string, string>;  // additional URL params (e.g. p=all, c=5000, page=2)
 }
 
 export interface WtoDataset {
@@ -47,6 +48,8 @@ export interface WtoDataset {
   Year:                 number | null;
   Value:                number | null;
   ValueFlagCode:        string | null;
+  PartnerEconomyCode?:  string | null;  // present in HS_P_0070 responses (WTO field name)
+  PartnerCode?:         string | null;  // alias used in some WTO response variants
 }
 
 export interface WtoResponse {
@@ -63,6 +66,9 @@ export async function wtoFetch(opts: WtoCallOptions): Promise<WtoResponse> {
   });
   if (opts.productCode) params.set('pc', opts.productCode);
   if (opts.year)        params.set('ps', String(opts.year));
+  if (opts.extraParams) {
+    for (const [k, v] of Object.entries(opts.extraParams)) params.set(k, v);
+  }
 
   const url = `${BASE_URL}?${params}`;
 

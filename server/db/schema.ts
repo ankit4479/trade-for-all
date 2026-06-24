@@ -192,6 +192,14 @@ export const hsMfnDuties = pgTable(
     nbrTariffLines: integer('nbr_tariff_lines'),        // HS_A_0040
     nbrNavLines: integer('nbr_nav_lines'),              // HS_A_0050
 
+    // ── SCD Type-2 history (ADR-023): never overwrite, version on change ──
+    version: integer('version').notNull().default(1),
+    validFrom: timestamp('valid_from', { withTimezone: true }).notNull().defaultNow(),
+    validTo: timestamp('valid_to', { withTimezone: true }),          // null = still current
+    isCurrent: boolean('is_current').notNull().default(true),
+    rowHash: varchar('row_hash', { length: 64 }),                    // sha-256 of value fields
+    lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }).notNull().defaultNow(),
+
     sourceId: uuid('source_id').references(() => sources.id),
     ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
     fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
@@ -199,18 +207,24 @@ export const hsMfnDuties = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (t) => ({
-    uq: uniqueIndex('hs_mfn_duties_uq').on(t.reporterCode, t.hsCode, t.hsEdition, t.year),
+    // Exactly ONE current row per natural key; unlimited historical versions.
+    currentUq: uniqueIndex('hs_mfn_duties_current_uq')
+      .on(t.reporterCode, t.hsCode, t.hsEdition, sql`coalesce(${t.year}, 0)`)
+      .where(sql`is_current`),
     lookupIdx: index('hs_mfn_duties_lookup_idx').on(t.hsCode, t.reporterCode),
+    historyIdx: index('hs_mfn_duties_history_idx')
+      .on(t.reporterCode, t.hsCode, t.hsEdition, t.year, t.version),
   }),
 );
 
 /* ── hs_preferential_rates: WTO lowest preferential rate per corridor ─
  * Maps to WTO indicator HS_P_0070 (lowest preferential simple avg %).
- * Returns HTTP 204 when no FTA covers this reporter×HS combination —
- * stored as NULL simple_avg_pct with coverage_status = 'no_fta'.
+ * Only rows where an FTA exists are stored — absence = no FTA, pay MFN.
  *
- * reporter_code = importer (destination), partner_code = exporter (origin).
- * For our corridors: reporter = US/GB/EU/AU/AE, partner = IN.
+ * reporter_code = importer destination (FK → jurisdictions.code).
+ * partner_code  = exporter origin — WTO numeric code (e.g. '356' India,
+ *   '156' China). NO FK: covers all ~170 WTO members, not just our 8.
+ * Fetched with p=all so one call per chapter returns all partner FTAs.
  * -------------------------------------------------------------------- */
 export const hsPreferentialRates = pgTable(
   'hs_preferential_rates',
@@ -219,7 +233,7 @@ export const hsPreferentialRates = pgTable(
     reporterCode: varchar('reporter_code', { length: 8 })
       .notNull().references(() => jurisdictions.code),
     partnerCode: varchar('partner_code', { length: 8 })
-      .notNull().references(() => jurisdictions.code),
+      .notNull(),  // WTO numeric code — no FK, covers all ~170 WTO members
     hsCode: varchar('hs_code', { length: 6 }).notNull(),
     hsEdition: varchar('hs_edition', { length: 8 }).notNull().default('HS2022'),
     year: integer('year'),
@@ -228,6 +242,14 @@ export const hsPreferentialRates = pgTable(
     coverageStatus: varchar('coverage_status', { length: 32 })
       .notNull().default('unknown'),                     // 'available' | 'no_fta' | 'pending'
 
+    // ── SCD Type-2 history (ADR-023): never overwrite, version on change ──
+    version: integer('version').notNull().default(1),
+    validFrom: timestamp('valid_from', { withTimezone: true }).notNull().defaultNow(),
+    validTo: timestamp('valid_to', { withTimezone: true }),          // null = still current
+    isCurrent: boolean('is_current').notNull().default(true),
+    rowHash: varchar('row_hash', { length: 64 }),                    // sha-256 of value fields
+    lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }).notNull().defaultNow(),
+
     sourceId: uuid('source_id').references(() => sources.id),
     ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
     fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
@@ -235,50 +257,16 @@ export const hsPreferentialRates = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (t) => ({
-    uq: uniqueIndex('hs_pref_rates_uq').on(
-      t.reporterCode, t.partnerCode, t.hsCode, t.hsEdition, t.year,
-    ),
+    // Exactly ONE current row per natural key; unlimited historical versions.
+    currentUq: uniqueIndex('hs_pref_rates_current_uq')
+      .on(t.reporterCode, t.partnerCode, t.hsCode, t.hsEdition, sql`coalesce(${t.year}, 0)`)
+      .where(sql`is_current`),
     lookupIdx: index('hs_pref_rates_lookup_idx').on(t.hsCode, t.reporterCode, t.partnerCode),
+    historyIdx: index('hs_pref_rates_history_idx')
+      .on(t.reporterCode, t.partnerCode, t.hsCode, t.hsEdition, t.year, t.version),
   }),
 );
 
-/* ── country_tariff_profiles: WTO country-level tariff summary stats ──
- * Maps to WTO TP_A_* indicators (one row per reporter × year):
- *   simple_avg_mfn_all_pct     ← TP_A_0010
- *   trade_wtd_mfn_all_pct      ← TP_A_0030
- *   simple_avg_mfn_agr_pct     ← TP_A_0160
- *   trade_wtd_mfn_agr_pct      ← TP_A_0170
- *   simple_avg_mfn_non_agr_pct ← TP_A_0430
- *   trade_wtd_mfn_non_agr_pct  ← TP_A_0440
- *
- * Used to show "USA average tariff: 3.3%" context alongside product rates.
- * -------------------------------------------------------------------- */
-export const countryTariffProfiles = pgTable(
-  'country_tariff_profiles',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    reporterCode: varchar('reporter_code', { length: 8 })
-      .notNull().references(() => jurisdictions.code),
-    year: integer('year').notNull(),
-
-    simpleAvgMfnAllPct: doublePrecision('simple_avg_mfn_all_pct'),
-    tradeWtdMfnAllPct: doublePrecision('trade_wtd_mfn_all_pct'),
-    simpleAvgMfnAgrPct: doublePrecision('simple_avg_mfn_agr_pct'),
-    tradeWtdMfnAgrPct: doublePrecision('trade_wtd_mfn_agr_pct'),
-    simpleAvgMfnNonAgrPct: doublePrecision('simple_avg_mfn_non_agr_pct'),
-    tradeWtdMfnNonAgrPct: doublePrecision('trade_wtd_mfn_non_agr_pct'),
-
-    sourceId: uuid('source_id').references(() => sources.id),
-    ingestionRunId: uuid('ingestion_run_id').references(() => ingestionRuns.id),
-    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
-    staleAt: timestamp('stale_at', { withTimezone: true }),
-    expiresAt: timestamp('expires_at', { withTimezone: true }),
-  },
-  (t) => ({
-    uq: uniqueIndex('country_tariff_profiles_uq').on(t.reporterCode, t.year),
-    lookupIdx: index('country_tariff_profiles_lookup_idx').on(t.reporterCode),
-  }),
-);
 
 /* ── trade_flows: UN Comtrade import/export volumes ──────────────────
  * One row per (reporter × partner × hs_code × flow × year).

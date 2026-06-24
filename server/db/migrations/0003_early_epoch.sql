@@ -1,0 +1,1 @@
+DROP TABLE "country_tariff_profiles" CASCADE;

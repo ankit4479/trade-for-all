@@ -27,6 +27,7 @@ import {
 import { createLogger } from './_lib/logger';
 import { wtoFetch } from './_lib/wto-client';
 import { computeFreshness, isFresh } from './_lib/freshness';
+import { scd2Upsert, Scd2Result } from './_lib/scd2';
 import { eq, and, gt, count, sql } from 'drizzle-orm';
 
 const LOADER_NAME  = 'wto-mfn';
@@ -124,6 +125,8 @@ async function run(): Promise<void> {
   let totalPrefUpserted  = 0;
   let totalChaptersSkipped = 0;
   let chaptersDone = 0;
+  // SCD-2 outcome tally — proves versioning is working at a glance.
+  const tally: Record<Scd2Result, number> = { inserted: 0, verified: 0, versioned: 0 };
 
   try {
     for (const chapter of chapters) {
@@ -208,34 +211,27 @@ async function run(): Promise<void> {
         const reporterCode = wtoToCode.get(wtoReporter);
         if (!reporterCode) continue;
 
-        await db.insert(hsMfnDuties).values({
-          reporterCode,
-          hsCode,
-          hsEdition:      'HS2022',
-          year:           YEAR,
-          simpleAvgPct:   fields.simpleAvgPct,
-          maxRatePct:     fields.maxRatePct,
-          dutyFreePct:    fields.dutyFreePct,
-          nbrTariffLines: fields.nbrTariffLines,
-          nbrNavLines:    fields.nbrNavLines,
-          sourceId:       source.id,
-          ingestionRunId,
-          fetchedAt,
-          staleAt,
-          expiresAt,
-        }).onConflictDoUpdate({
-          target: [hsMfnDuties.reporterCode, hsMfnDuties.hsCode, hsMfnDuties.hsEdition, hsMfnDuties.year],
-          set: {
+        const result = await scd2Upsert({
+          table:      hsMfnDuties,
+          naturalKey: and(
+            eq(hsMfnDuties.reporterCode, reporterCode),
+            eq(hsMfnDuties.hsCode, hsCode),
+            eq(hsMfnDuties.hsEdition, 'HS2022'),
+            eq(hsMfnDuties.year, YEAR),
+          )!,
+          valueFields: {
             simpleAvgPct:   fields.simpleAvgPct,
             maxRatePct:     fields.maxRatePct,
             dutyFreePct:    fields.dutyFreePct,
             nbrTariffLines: fields.nbrTariffLines,
             nbrNavLines:    fields.nbrNavLines,
-            fetchedAt,
-            staleAt,
-            expiresAt,
           },
+          staticFields: {
+            reporterCode, hsCode, hsEdition: 'HS2022', year: YEAR, sourceId: source.id,
+          },
+          fetchedAt, staleAt, expiresAt, ingestionRunId,
         });
+        tally[result]++;
         totalMfnUpserted++;
       }
 
@@ -271,35 +267,23 @@ async function run(): Promise<void> {
           const coverageStatus = hasData ? 'available' : 'no_fta';
           const prefValue     = hasData ? prefData.get(prefKey) ?? null : null;
 
-          await db.insert(hsPreferentialRates).values({
-            reporterCode:   destination.code,
-            partnerCode:    PARTNER_CODE,
-            hsCode,
-            hsEdition:      'HS2022',
-            year:           YEAR,
-            simpleAvgPct:   prefValue,
-            coverageStatus,
-            sourceId:       source.id,
-            ingestionRunId,
-            fetchedAt,
-            staleAt,
-            expiresAt,
-          }).onConflictDoUpdate({
-            target: [
-              hsPreferentialRates.reporterCode,
-              hsPreferentialRates.partnerCode,
-              hsPreferentialRates.hsCode,
-              hsPreferentialRates.hsEdition,
-              hsPreferentialRates.year,
-            ],
-            set: {
-              simpleAvgPct:   prefValue,
-              coverageStatus,
-              fetchedAt,
-              staleAt,
-              expiresAt,
+          const result = await scd2Upsert({
+            table:      hsPreferentialRates,
+            naturalKey: and(
+              eq(hsPreferentialRates.reporterCode, destination.code),
+              eq(hsPreferentialRates.partnerCode, PARTNER_CODE),
+              eq(hsPreferentialRates.hsCode, hsCode),
+              eq(hsPreferentialRates.hsEdition, 'HS2022'),
+              eq(hsPreferentialRates.year, YEAR),
+            )!,
+            valueFields: { simpleAvgPct: prefValue, coverageStatus },
+            staticFields: {
+              reporterCode: destination.code, partnerCode: PARTNER_CODE,
+              hsCode, hsEdition: 'HS2022', year: YEAR, sourceId: source.id,
             },
+            fetchedAt, staleAt, expiresAt, ingestionRunId,
           });
+          tally[result]++;
           totalPrefUpserted++;
         }
       }
@@ -321,6 +305,7 @@ async function run(): Promise<void> {
         chaptersSkipped:   totalChaptersSkipped,
         mfnUpserted:       totalMfnUpserted,
         prefUpserted:      totalPrefUpserted,
+        scd2:              tally,   // { inserted, verified, versioned }
       },
     });
 

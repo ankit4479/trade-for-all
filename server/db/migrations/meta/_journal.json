@@ -15,6 +15,27 @@
       "when": 1781539284453,
       "tag": "0001_pipeline_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781549242326,
+      "tag": "0002_omniscient_blink",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781591648460,
+      "tag": "0003_early_epoch",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782297808642,
+      "tag": "0004_peaceful_whirlwind",
+      "breakpoints": true
     }
   ]
 }

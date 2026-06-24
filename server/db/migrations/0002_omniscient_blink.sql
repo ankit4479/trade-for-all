@@ -1,0 +1,1 @@
+ALTER TABLE "hs_preferential_rates" DROP CONSTRAINT "hs_preferential_rates_partner_code_jurisdictions_code_fk";

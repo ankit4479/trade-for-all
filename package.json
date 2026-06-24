@@ -15,10 +15,11 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx server/db/seed.ts",
+    "db:load:jurisdictions": "tsx server/loaders/jurisdictions.ts",
     "db:load:hs": "tsx server/loaders/hs-codes.ts",
-    "db:load:country": "tsx server/loaders/wto-country.ts",
     "db:load:mfn": "tsx server/loaders/wto-mfn.ts",
-    "db:load:all": "npm run db:load:hs && npm run db:load:country && npm run db:load:mfn"
+    "db:load:pref": "tsx server/loaders/wto-pref.ts",
+    "db:load:all": "npm run db:load:jurisdictions && npm run db:load:hs && npm run db:load:mfn && npm run db:load:pref"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -34,6 +35,7 @@
     "express": "^4.22.1",
     "firebase": "^12.10.0",
     "firebase-admin": "^13.7.0",
+    "i18n-iso-countries": "^7.14.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.546.0",

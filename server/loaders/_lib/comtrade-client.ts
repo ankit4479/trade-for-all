@@ -65,7 +65,8 @@ export async function comtradeFetch(opts: ComtradeCallOptions): Promise<Comtrade
     partnerCode:  opts.partnerCode ?? '0',
     flowCode:     opts.flowCode ?? 'M',
   });
-  if (opts.cmdCode) params.set('cmdCode', opts.cmdCode);
+  if (opts.cmdCode)      params.set('cmdCode', opts.cmdCode);
+  if (!opts.partnerCode) params.delete('partnerCode');  // omit = all partners
 
   const url = `${BASE_URL}?${params}`;
 

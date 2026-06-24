@@ -360,6 +360,15 @@ Within a milestone, **∥** = parallel-safe (separate sub-agents); **→** = dep
 (lazy d3/jspdf/maps, remove Maps gate, code-split, Lighthouse+bundlesize gates) ∥.
 ✅ **Check 0:** tokens/primitives/SourceChip preview; CI fails on budget regress; app still runs; App.tsx thin.
 
+**DP — Design Pass (GATE between M0 and M1, after 0.1 tokens + 0.2 shadcn)** — the **hi-fi visual design source**,
+done **design-in-code** (NOT Figma) so it can't drift from the implementation and becomes the real components.
+DP.1 Storybook setup (living design source + component catalog, replaces the throwaway /styleguide route) ·
+DP.2 Visual North Star doc (deliberate aesthetic + references + map quality bar) · DP.3 Hi-fi mockups of the 8
+key screens (Landing · Workspace · Canvas · Deep-dive · Simulator · History · Pricing · Quota wall — static,
+fixture data, responsive, all 6 states).
+✅ **Check DP (sign-off GATE):** the 8 screens render hi-fi in Storybook and are **visually signed off** — no M1+
+feature logic ships until the look is approved. This turns "token-consistent" into "looks premium."
+
 **M1 Conversation→Canvas shell** — 1.1 WorkspaceLayout (history∣chat∣canvas + responsive) →M0 ·
 1.2 Chat pane ∥ · 1.3 CanvasShell + skeleton grid ∥ · 1.4 routing + session URL ∥.
 ✅ **Check 1:** empty workspace at all breakpoints; mobile toggle; start a mock session; keyboard/focus ok.

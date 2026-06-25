@@ -309,16 +309,21 @@ adminRouter.get('/tables', async (_req, res) => {
 });
 
 /* ── GET /tables/:table/schema — column metadata (drives UI + filters) ─────
- * ROUND-TRIP BUDGET: exactly 2.
+ * ROUND-TRIP BUDGET: ≤2.
  *   (1) ONE CTE query returns columns + PK flags + FK targets in a single pass.
+ *       The BASE-TABLE existence check is folded into this query's EXISTS, so
+ *       unknown tables / views come back as 0 rows (→ 404) without a separate
+ *       catalog round-trip.
  *   (2) ONE batched enum query fetches all labels for every USER-DEFINED column
  *       via `WHERE typname = ANY(...)` — this kills the old per-column N+1.
- * If there are no enum columns we skip query (2) entirely → 1 round-trip. */
+ * No enum columns → query (2) is skipped → 1 round-trip. */
 adminRouter.get('/tables/:table/schema', async (req, res) => {
   try {
     const { table } = req.params;
-    // Denied + unknown tables share the same 404 (indistinguishable).
-    if (isTableDenied(table) || !(await listTables()).includes(table)) {
+    // Denied tables 404 immediately (in-memory, no query). Unknown tables and
+    // views are rejected after the CTE below returns 0 rows — same 404, and it
+    // keeps this endpoint at ≤2 round-trips.
+    if (isTableDenied(table)) {
       return res.status(404).json({ error: `unknown table: ${table}` });
     }
 
@@ -363,7 +368,18 @@ adminRouter.get('/tables/:table/schema', async (req, res) => {
       LEFT JOIN pk ON pk.column_name = c.column_name
       LEFT JOIN fk ON fk.column_name = c.column_name
       WHERE c.table_schema = 'public' AND c.table_name = ${table}
+        AND EXISTS (
+          SELECT 1 FROM information_schema.tables it
+          WHERE it.table_schema = 'public' AND it.table_name = ${table}
+            AND it.table_type = 'BASE TABLE'
+        )
       ORDER BY c.ordinal_position`;
+
+    // Unknown table or a view (not a BASE TABLE) → the EXISTS guard returns 0
+    // rows; same 404 as a denied/missing table, resolved without an extra query.
+    if (cols.length === 0) {
+      return res.status(404).json({ error: `unknown table: ${table}` });
+    }
 
     // (2) ONE batched enum query for ALL USER-DEFINED columns (no N+1).
     const udtNames = [...new Set(

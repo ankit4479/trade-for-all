@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
+import { adminRouter } from './server/api/admin';
 
 async function startServer() {
   const app = express();
@@ -114,6 +115,30 @@ async function startServer() {
       });
     }
   });
+
+  /* ── Admin data dashboard (read-only, dev-only) ──────────────────────────
+   * Gate + mount BEFORE the vite middleware below: in dev, vite.middlewares
+   * swallows every unmatched route, so mounting after it would 404 the API.
+   *
+   * The 404 kill-switch is keyed STRICTLY on NODE_ENV === 'production' (NOT the
+   * broader `isProduction` flag that also trips on a local `dist/`): a developer
+   * who has run a local build should still get the dashboard. In prod the route
+   * is 404 — indistinguishable from non-existent. Token check fails closed.
+   */
+  const adminGate: express.RequestHandler = (req, res, next) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).end();
+    }
+    const token = process.env.ADMIN_TOKEN;
+    if (!token) {
+      return res.status(401).json({ error: 'ADMIN_TOKEN not set (admin API fails closed)' });
+    }
+    if (req.get('x-admin-token') !== token) {
+      return res.status(401).json({ error: 'invalid admin token' });
+    }
+    next();
+  };
+  app.use('/api/admin', adminGate, adminRouter);
 
   const isProduction = process.env.NODE_ENV === 'production' || fs.existsSync(path.join(process.cwd(), 'dist'));
   console.log(`[Server] Running in ${isProduction ? 'production' : 'development'} mode (NODE_ENV: ${process.env.NODE_ENV})`);
